@@ -1,0 +1,27 @@
+{
+  "name": "aura-core",
+  "version": "2.0.0",
+  "description": "Autonomous AI coding agent for the terminal — ReAct loop, native tool calling, self-healing",
+  "type": "module",
+  "bin": {
+    "aura": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "dev": "bun run --watch src/cli.ts",
+    "build": "bun build --compile src/cli.ts --outfile aura"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.0",
+    "@clack/prompts": "^0.7.0",
+    "openai": "^4.77.0",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}
