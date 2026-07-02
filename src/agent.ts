@@ -133,7 +133,7 @@ class BrailleSpinner {
 
   private render(): void {
     const frame = SPINNER_FRAMES[this.frameIdx];
-    process.stdout.write(`\r${this.colorFn(frame)} ${pc.gray(this.text)}`);
+    process.stdout.write(`\r\x1b[K${this.colorFn(frame)} ${pc.gray(this.text)}`);
   }
 
   stop(finalText?: string): void {
@@ -193,7 +193,7 @@ function clearToolSpinner(): void {
 function renderToolSpinner(): void {
   const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
   toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
-  process.stdout.write(`\r   ${toolSpinnerColor(frame)} ${pc.gray(toolSpinnerLabel)}`);
+  process.stdout.write(`\r\x1b[K   ${toolSpinnerColor(frame)} ${pc.gray(toolSpinnerLabel)}`);
 }
 
 function printToolPending(name: string, input: Record<string, unknown>): void {
@@ -208,7 +208,7 @@ function printToolPending(name: string, input: Record<string, unknown>): void {
   toolSpinnerTimer = setInterval(() => {
     toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
     const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
-    process.stdout.write(`\r   ${toolSpinnerColor(frame)} ${toolSpinnerLabel}`);
+    process.stdout.write(`\r\x1b[K   ${toolSpinnerColor(frame)} ${toolSpinnerLabel}`);
   }, 120);
 }
 
