@@ -81,8 +81,6 @@ const SYSTEM_PROMPT = `You are Aura-Core, an elite autonomous AI coding agent op
 - When you are done, clearly state that the task is complete.
 - Do not use markdown headers in your responses. Use plain text.`;
 
-const SPINNER_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
-const SPINNER_INTERVAL = 80;
 
 function truncateCmd(cmd: string, max: number = 55): string {
   return cmd.length > max ? cmd.slice(0, max - 3) + "..." : cmd;
@@ -107,39 +105,28 @@ function clearLine(): void {
 }
 
 class BrailleSpinner {
-  private frameIdx = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private text: string;
   private colorFn: (s: string) => string;
+  private active = false;
 
   constructor(text: string, colorFn: (s: string) => string) {
-    this.text = text;
     this.colorFn = colorFn;
+    this.write(text);
+    this.active = true;
   }
 
   setText(text: string): void {
-    this.text = text;
-    if (this.timer) this.render();
-  }
-
-  start(): void {
-    this.frameIdx = 0;
-    this.render();
-    this.timer = setInterval(() => {
-      this.frameIdx = (this.frameIdx + 1) % SPINNER_FRAMES.length;
-      this.render();
-    }, SPINNER_INTERVAL);
-  }
-
-  private render(): void {
-    const frame = SPINNER_FRAMES[this.frameIdx];
-    process.stdout.write(`\r\x1b[K${this.colorFn(frame)} ${pc.gray(this.text)}`);
+    if (this.active) this.write(text);
   }
 
   stop(finalText?: string): void {
-    if (this.timer) { clearInterval(this.timer); this.timer = null; }
-    clearLine();
-    if (finalText) process.stdout.write(finalText + "\n");
+    if (this.active) {
+      this.active = false;
+      if (finalText) console.log(finalText);
+    }
+  }
+
+  private write(text: string): void {
+    console.log(`   ${this.colorFn("\u25C9")} ${pc.gray(text)}`);
   }
 }
 
@@ -180,36 +167,15 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
   }
 }
 
-const TOOL_SPINNER_FRAMES = ["\u25D4", "\u25D0", "\u25D5", "\u25D1"];
-let toolSpinnerTimer: ReturnType<typeof setInterval> | null = null;
-let toolSpinnerFrame = 0;
-let toolSpinnerLabel = "";
-let toolSpinnerColor: (s: string) => string = pc.gray;
 
 function clearToolSpinner(): void {
-  if (toolSpinnerTimer) { clearInterval(toolSpinnerTimer); toolSpinnerTimer = null; }
-}
-
-function renderToolSpinner(): void {
-  const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
-  toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
-  process.stdout.write(`\r\x1b[K   ${toolSpinnerColor(frame)} ${pc.gray(toolSpinnerLabel)}`);
 }
 
 function printToolPending(name: string, input: Record<string, unknown>): void {
   clearToolSpinner();
-  const glyph = toolGlyph(name);
   const color = toolColor(name);
   const label = toolLabel(name, input);
-  toolSpinnerLabel = `${color(glyph)} ${pc.dim(label)}`;
-  toolSpinnerColor = color;
-  toolSpinnerFrame = 0;
-  renderToolSpinner();
-  toolSpinnerTimer = setInterval(() => {
-    toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
-    const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
-    process.stdout.write(`\r\x1b[K   ${toolSpinnerColor(frame)} ${toolSpinnerLabel}`);
-  }, 120);
+  console.log(`   ${color(toolGlyph(name))} ${pc.gray(label)}`);
 }
 
 function printToolDone(name: string, input: Record<string, unknown>, success: boolean, detail?: string): void {
@@ -218,15 +184,12 @@ function printToolDone(name: string, input: Record<string, unknown>, success: bo
   const label = toolLabel(name, input);
   const detailStr = detail ? ` ${pc.gray(detail)}` : "";
   const icon = success ? color("\u2713") : COL.red("\u2717");
-  const line = `   ${icon} ${success ? pc.gray(label) : COL.red(label)}${detailStr}`;
-  process.stdout.write(`\r${" ".repeat(80)}\r`);
-  console.log(line);
+  console.log(`   ${icon} ${success ? pc.gray(label) : COL.red(label)}${detailStr}`);
 }
 
 function printToolError(name: string, input: Record<string, unknown>, error: string): void {
   clearToolSpinner();
   const label = toolLabel(name, input);
-  process.stdout.write(`\r${" ".repeat(80)}\r`);
   console.log(`   ${COL.red("\u2717")} ${COL.red(label)}`);
   console.log(`     ${COL.red(error.slice(0, 100))}`);
 }
@@ -620,7 +583,6 @@ export class Agent {
   private async streamAnthropic(): Promise<RawMessage> {
     const c = providerColor(this.config.provider);
     const spinner = new BrailleSpinner("Thinking...", c);
-    spinner.start();
     let firstText = true;
     let firstThinking = true;
     const thinkingStart = Date.now();
@@ -721,7 +683,6 @@ export class Agent {
   private async streamOpenAI(): Promise<RawMessage> {
     const c = providerColor(this.config.provider);
     const spinner = new BrailleSpinner("Thinking...", c);
-    spinner.start();
     let firstText = true;
 
     const messages = convertMessagesToOpenAI(this.conversation, this.getSystemPrompt());
@@ -975,7 +936,6 @@ export class Agent {
     }
 
     const spinner = new BrailleSpinner(`$ ${truncateCmd(input.command, 45)}`, COL.peach);
-    spinner.start();
     try {
       const result = await toolExecuteShell(input.command, this.config.workingDirectory, input.timeout ?? 60_000);
       spinner.stop();
