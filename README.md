@@ -24,20 +24,20 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 ## Features
 
 ### Multi-Provider AI
-| Provider | Models | Reasoning |
-|---|---|---|
-| **Anthropic** | Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku | ✓ |
-| **OpenAI** | GPT-4o, GPT-4o-mini, o3, o4-mini, o1, o1-mini | ✓ |
-| **MiniMax** | MiniMax-Text-01 | ✓ (Token Plans) |
-| **DeepSeek** | DeepSeek V3, DeepSeek R1 | ✓ |
-| **Groq** | Llama 3.3, Llama 3.2, Gemma 2, Mixtral | ✗ |
-| **Together AI** | Llama 3.3, Qwen 2.5, DeepSeek | ✗ |
-| **Fireworks** | Llama 3.1, DeepSeek, Qwen 2 | ✗ |
-| **Mistral** | Mistral Large, Mistral Nemo, Codestral | ✓ |
-| **Cerebras** | Llama 3.1 8B, Llama 3.1 70B | ✗ |
-| **OpenRouter** | All OpenRouter models | varies |
-| **OpenAI-Compatible** | Any OpenAI-compatible endpoint | varies |
-| **Anthropic-Compatible** | Any Anthropic-compatible endpoint | varies |
+| Provider | Reasoning |
+|---|---|
+| **Anthropic** | ✓ |
+| **OpenAI** | ✓ |
+| **MiniMax** | ✓ (Token Plans) |
+| **DeepSeek** | ✓ |
+| **Groq** | ✗ |
+| **Together AI** | ✗ |
+| **Fireworks** | ✗ |
+| **Mistral** | ✓ |
+| **Cerebras** | ✗ |
+| **OpenRouter** | varies |
+| **OpenAI-Compatible** | varies |
+| **Anthropic-Compatible** | varies |
 
 ### 9 Native Tools
 - `list_files` — Map project structure (respects .gitignore)
