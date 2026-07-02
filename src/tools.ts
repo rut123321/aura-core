@@ -1,5 +1,6 @@
 import { readdirSync, statSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname, normalize } from "node:path";
+import { Minimatch } from "minimatch";
 import type { Tool, ShellResult, ProjectFile, FileBackup } from "./types";
 
 const ALWAYS_IGNORED_DIRS = new Set([".git", "node_modules", ".next", ".turbo", ".cache", "coverage", ".bun"]);
@@ -127,7 +128,7 @@ function formatFileList(files: ProjectFile[]): string {
   return lines.join("\n");
 }
 
-function resolveSafePath(inputPath: string, workingDir: string): string {
+export function resolveSafePath(inputPath: string, workingDir: string): string {
   const normalizedWorking = resolve(workingDir);
   const resolved = resolve(workingDir, inputPath);
   const normalizedResolved = normalize(resolved);
@@ -401,17 +402,12 @@ export async function toolGlob(
     throw new Error(`Directory not found: ${searchPath}`);
   }
 
-  let regex: RegExp;
+  let mm: Minimatch;
   try {
-    const globPattern = pattern
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*\*/g, ".__GLOBSTAR__.")
-      .replace(/\*/g, "[^/]*")
-      .replace(/\?/g, "[^/]")
-      .replace(/\.__GLOBSTAR__\./g, ".*");
-    regex = new RegExp(globPattern + "$", "i");
+    mm = new Minimatch(pattern, { dot: true, matchBase: false });
   } catch {
-    regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i");
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    mm = new Minimatch(escaped, { dot: true, matchBase: false });
   }
 
   const gitignorePatterns = getIgnoredPatterns(workingDir);
@@ -445,7 +441,7 @@ export async function toolGlob(
         walkDir(fullPath);
       } else if (isFile) {
         if (isIgnored(relPath, gitignorePatterns)) continue;
-        if (regex.test(relPath) || regex.test(name)) {
+        if (mm.match(relPath) || mm.match(name)) {
           results.push(relPath);
         }
       }

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import pc from "picocolors";
 import type { AuraConfig, ProjectTypeInfo } from "./types";
@@ -69,11 +69,12 @@ export function detectProjectType(workdir: string): ProjectTypeInfo {
   if (has("package.json")) {
     const pkg = readPkg();
     const pm = has("pnpm-lock.yaml") ? "pnpm" : has("yarn.lock") ? "yarn" : "npm";
+    const testScript = pkg?.scripts?.test ?? "";
     return {
       type: "node",
       language: pkg?.type === "module" ? "ESM JavaScript" : "JavaScript/TypeScript",
       buildCmd: pkg?.scripts?.build ? `${pm} run build` : null,
-      testCmd: pkg?.scripts?.test ? `${pm} test` : pkg?.scripts?.vitest ? `npx vitest run` : null,
+      testCmd: testScript ? (testScript.includes("vitest") ? `npx vitest run` : `${pm} test`) : null,
       lintCmd: pkg?.scripts?.lint ? `${pm} run lint` : has(".eslintrc") ? "npx eslint ." : null,
       runCmd: pkg?.scripts?.dev ? `${pm} run dev` : pkg?.scripts?.start ? `${pm} start` : null,
       packageManager: pm,
@@ -130,14 +131,101 @@ export function detectProjectType(workdir: string): ProjectTypeInfo {
   }
 
   if (has("pom.xml") || has("build.gradle")) {
+    const hasGradle = has("build.gradle");
     return {
       type: "java",
       language: "Java",
-      buildCmd: has("mvnw") ? "./mvnw compile" : "mvn compile",
-      testCmd: has("mvnw") ? "./mvnw test" : "mvn test",
+      buildCmd: hasGradle ? (has("gradlew") ? "./gradlew build" : "gradle build") : has("mvnw") ? "./mvnw compile" : "mvn compile",
+      testCmd: hasGradle ? (has("gradlew") ? "./gradlew test" : "gradle test") : has("mvnw") ? "./mvnw test" : "mvn test",
       lintCmd: null,
       runCmd: null,
-      packageManager: "maven",
+      packageManager: hasGradle ? "gradle" : "maven",
+    };
+  }
+
+  if (has("mix.exs")) {
+    return {
+      type: "elixir",
+      language: "Elixir",
+      buildCmd: "mix compile",
+      testCmd: "mix test",
+      lintCmd: "mix credo --strict",
+      runCmd: "mix run",
+      packageManager: "mix",
+    };
+  }
+
+  if (has("Package.swift")) {
+    return {
+      type: "swift",
+      language: "Swift",
+      buildCmd: "swift build",
+      testCmd: "swift test",
+      lintCmd: null,
+      runCmd: "swift run",
+      packageManager: "spm",
+    };
+  }
+
+  if (has("composer.json")) {
+    return {
+      type: "php",
+      language: "PHP",
+      buildCmd: null,
+      testCmd: has("vendor/bin/phpunit") ? "phpunit" : "vendor/bin/phpunit",
+      lintCmd: has("vendor/bin/phpcs") ? "phpcs" : null,
+      runCmd: null,
+      packageManager: "composer",
+    };
+  }
+
+  const hasSln = (() => { try { return readdirSync(workdir).some(f => f.endsWith(".sln")); } catch { return false; } })();
+  const hasCsproj = (() => { try { return readdirSync(workdir).some(f => f.endsWith(".csproj")); } catch { return false; } })();
+  if (hasSln || hasCsproj) {
+    return {
+      type: "dotnet",
+      language: "C#",
+      buildCmd: "dotnet build",
+      testCmd: "dotnet test",
+      lintCmd: null,
+      runCmd: "dotnet run",
+      packageManager: "nuget",
+    };
+  }
+
+  if (has("deno.json") || has("deno.jsonc")) {
+    return {
+      type: "deno",
+      language: "TypeScript/JavaScript",
+      buildCmd: null,
+      testCmd: "deno test",
+      lintCmd: "deno lint",
+      runCmd: "deno run",
+      packageManager: "deno",
+    };
+  }
+
+  if (has("CMakeLists.txt")) {
+    return {
+      type: "cmake",
+      language: "C/C++",
+      buildCmd: "cmake --build .",
+      testCmd: "ctest",
+      lintCmd: null,
+      runCmd: null,
+      packageManager: "cmake",
+    };
+  }
+
+  if (has("Makefile")) {
+    return {
+      type: "make",
+      language: "C/C++",
+      buildCmd: "make",
+      testCmd: "make test",
+      lintCmd: null,
+      runCmd: null,
+      packageManager: "make",
     };
   }
 

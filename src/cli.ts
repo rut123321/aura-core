@@ -15,8 +15,10 @@ import {
   gitLog, gitBranch, gitCheckout, gitCreateBranch, gitChangesSummary,
 } from "./git";
 import {
-  saveSession, loadSession, listSessions, exportSessionMarkdown, getSessionDir,
+  saveSession, loadSession, listSessions, listSessionsDetailed, exportSessionMarkdown, getSessionDir,
+  loadGlobalSettings, saveGlobalSettings,
 } from "./session";
+
 import {
   addContextFile, dropContextFile, getContextFiles, clearContextFiles,
   parseFileReferences, createInitFile, loadInitFile,
@@ -156,6 +158,7 @@ function printHelp(): void {
     pc.bold("  Sessions"),
     `    ${pc.magenta("/save")}     ${pc.gray("[name]  Save session")}`,
     `    ${pc.magenta("/load")}     ${pc.gray("[name]  Load session")}`,
+    `    ${pc.magenta("/resume")}   ${pc.gray("Pick a saved session to resume")}`,
     `    ${pc.magenta("/sessions")} ${pc.gray("List saved sessions")}`,
     `    ${pc.magenta("/export")}   ${pc.gray("Export to Markdown")}`,
     "",
@@ -811,6 +814,30 @@ function handleSessionsList(): void {
   console.log();
 }
 
+async function handleResume(state: ReplState): Promise<void> {
+  const sessions = listSessionsDetailed();
+  if (sessions.length === 0) {
+    console.log(`\n  ${pc.gray("No saved sessions.")}\n`);
+    return;
+  }
+  const selected = await p.select({
+    message: "Resume session:",
+    options: sessions.map(s => ({
+      value: s.name,
+      label: pc.white(s.name),
+      hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}`,
+    })),
+  });
+  if (p.isCancel(selected)) { console.log(`\n  ${pc.gray("Cancelled")}\n`); return; }
+  const name = selected as string;
+  const data = loadSession(name);
+  if (!data) { console.log(`\n  ${pc.red("✗")} ${pc.red(`Session not found: ${name}`)}\n`); return; }
+  state.agent.setConversation(data.conversation as typeof state.agent.getConversation extends () => infer R ? R : never);
+  if (data.reasoningEffort) state.config.reasoningEffort = data.reasoningEffort;
+  console.log(`\n  ${pc.green("✓")} ${pc.green("Resumed:")} ${pc.white(name)} ${pc.gray(`(${data.conversation.length} messages)`)}`);
+  console.log();
+}
+
 async function handleExport(state: ReplState): Promise<void> {
   const input = await p.text({ message: "Export filename:", defaultValue: "aura-export.md", validate: (v) => { if (!v.trim()) return "Required"; return undefined; } });
   if (p.isCancel(input)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
@@ -1254,6 +1281,7 @@ async function runRepl(state: ReplState): Promise<void> {
         case "/init": handleInit(state); continue;
         case "/save": await handleSave(state, args); continue;
         case "/load": await handleLoad(state, args); continue;
+        case "/resume": await handleResume(state); continue;
         case "/sessions": handleSessionsList(); continue;
         case "/export": await handleExport(state); continue;
         case "/review": await handleReview(state); continue;
@@ -1320,6 +1348,7 @@ async function main(): Promise<void> {
   printBanner();
 
   const savedConfig = loadConfig(workdir);
+  const globalSettings = loadGlobalSettings();
 
   let provider: Provider;
   if (parsed.provider) {
@@ -1327,6 +1356,9 @@ async function main(): Promise<void> {
   } else if (savedConfig?.provider) {
     provider = savedConfig.provider;
     console.log(`  ${pc.gray("config:")} ${pc.gray(savedConfig.provider)}`);
+  } else if (globalSettings.lastProvider && PROVIDER_LIST.includes(globalSettings.lastProvider as Provider)) {
+    provider = globalSettings.lastProvider as Provider;
+    console.log(`  ${pc.gray("restored:")} ${pBadge(provider)}`);
   } else {
     const detected = PROVIDER_LIST.find((pr) => getApiKeyFromEnv(pr));
     if (detected) {
@@ -1370,14 +1402,19 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const modelFromSettings = globalSettings.lastModel && globalSettings.lastProvider === provider ? globalSettings.lastModel : null;
   const modelInfo = parsed.model
     ? { id: parsed.model, label: parsed.model.split("/").pop() ?? parsed.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
-    : await selectModelInteractive(provider, apiKey);
+    : savedConfig?.model
+      ? { id: savedConfig.model, label: savedConfig.model.split("/").pop() ?? savedConfig.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
+      : modelFromSettings
+        ? { id: modelFromSettings, label: modelFromSettings.split("/").pop() ?? modelFromSettings, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
+        : await selectModelInteractive(provider, apiKey);
 
   if (!modelInfo) { console.log(`\n  ${pc.red("\u2717")} ${pc.red("No model")}\n`); process.exit(1); }
 
-  let reasoning: ReasoningEffort = parsed.reasoning ?? savedConfig?.reasoningEffort ?? "off";
-  if (reasoning === "off" && PROVIDERS[provider].supportsReasoning && !parsed.model && !savedConfig?.reasoningEffort) {
+  let reasoning: ReasoningEffort = parsed.reasoning ?? savedConfig?.reasoningEffort ?? (globalSettings.lastReasoning as ReasoningEffort | null) ?? "off";
+  if (reasoning === "off" && PROVIDERS[provider].supportsReasoning && !parsed.model && !savedConfig?.reasoningEffort && !globalSettings.lastReasoning) {
     const r = await selectReasoning(provider);
     if (r) reasoning = r;
   }
@@ -1398,10 +1435,42 @@ async function main(): Promise<void> {
   const confirmFn = createConfirmFn(config.autoConfirm);
   const agent = new Agent(config, confirmFn);
 
+  saveGlobalSettings({
+    lastProvider: provider,
+    lastModel: modelInfo.id,
+    lastReasoning: reasoning,
+  });
+
   if (parsed.instruction) {
     const { processedPrompt } = parseFileReferences(parsed.instruction, workdir);
     await runAtomic(agent, processedPrompt, modelInfo, reasoning);
   } else {
+    const sessions = listSessionsDetailed();
+    if (sessions.length > 0) {
+      const resume = await p.confirm({
+        message: pc.white("Resume a previous session?"),
+        initialValue: false,
+      });
+      if (!p.isCancel(resume) && resume) {
+        const selected = await p.select({
+          message: "Choose session:",
+          options: sessions.map(s => ({
+            value: s.name,
+            label: pc.white(s.name),
+            hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}`,
+          })),
+        });
+        if (!p.isCancel(selected)) {
+          const name = selected as string;
+          const data = loadSession(name);
+          if (data) {
+            agent.setConversation(data.conversation as ReturnType<Agent["getConversation"]>);
+            if (data.reasoningEffort) config.reasoningEffort = data.reasoningEffort;
+            console.log(`\n  ${pc.green("✓")} ${pc.green(`Resumed: ${name}`)} ${pc.gray(`(${data.conversation.length} messages)`)}`);
+          }
+        }
+      }
+    }
     await runRepl({ agent, modelInfo, config, confirmFn });
   }
 }

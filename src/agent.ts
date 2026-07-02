@@ -521,6 +521,7 @@ export class Agent {
 
       const toolResults: ToolResultBlockParam[] = [];
       let shellFailedInThisBatch = false;
+      let shellSucceededInThisBatch = false;
 
       for (const block of toolUseBlocks) {
         const result = await this.executeTool(block);
@@ -531,12 +532,13 @@ export class Agent {
           is_error: result.isError,
         });
         if (result.isShellFailure) shellFailedInThisBatch = true;
+        if (block.name === "execute_shell" && !result.isShellFailure) shellSucceededInThisBatch = true;
       }
 
-      if (shellFailedInThisBatch) {
-        this.selfHealingAttempts++;
-      } else if (toolUseBlocks.some((b) => b.name === "execute_shell")) {
+      if (shellSucceededInThisBatch) {
         this.selfHealingAttempts = 0;
+      } else if (shellFailedInThisBatch) {
+        this.selfHealingAttempts++;
       }
 
       this.conversation.push({ role: "user", content: toolResults });

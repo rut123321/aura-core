@@ -1,17 +1,9 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, dirname } from "node:path";
 import type { ContextFile } from "./types";
+import { resolveSafePath } from "./tools";
 
 const contextFiles: Map<string, ContextFile> = new Map();
-
-function resolveSafePath(inputPath: string, workingDir: string): string {
-  const normalizedWorking = resolve(workingDir);
-  const resolved = resolve(workingDir, inputPath);
-  if (!resolved.startsWith(normalizedWorking)) {
-    throw new Error(`Path "${inputPath}" is outside the working directory.`);
-  }
-  return resolved;
-}
 
 export function addContextFile(relPath: string, workingDir: string): { success: boolean; message: string; file?: ContextFile } {
   const safePath = resolveSafePath(relPath, workingDir);
@@ -60,13 +52,27 @@ export function buildContextBlock(): string {
 export function parseFileReferences(input: string, workingDir: string): { processedPrompt: string; addedFiles: string[]; errors: string[] } {
   const addedFiles: string[] = [];
   const errors: string[] = [];
-  const fileRefRegex = /@([\w./\\-]+\.\w+)/g;
   let processedPrompt = input;
-  let match: RegExpExecArray | null;
 
+  const seen = new Set<string>();
   const matches: Array<{ full: string; path: string }> = [];
-  while ((match = fileRefRegex.exec(input)) !== null) {
-    matches.push({ full: match[0], path: match[1] });
+
+  const refRegex = /@([\w./\\-]+(?:\.[\w]+)?)/g;
+  let match: RegExpExecArray | null;
+  while ((match = refRegex.exec(input)) !== null) {
+    const full = match[0];
+    const path = match[1];
+    if (seen.has(full)) continue;
+    seen.add(full);
+    const hasExt = path.includes(".");
+    if (hasExt) {
+      matches.push({ full, path });
+    } else {
+      const safePath = resolveSafePath(path, workingDir);
+      if (existsSync(safePath)) {
+        matches.push({ full, path });
+      }
+    }
   }
 
   for (const m of matches) {

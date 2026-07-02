@@ -9,11 +9,13 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "dev": "bun run --watch src/cli.ts",
-    "build": "bun build --compile src/cli.ts --outfile aura"
+    "build": "bun build --compile src/cli.ts --outfile aura",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",
     "@clack/prompts": "^0.7.0",
+    "minimatch": "^10.2.5",
     "openai": "^4.77.0",
     "picocolors": "^1.1.0"
   },

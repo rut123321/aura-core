@@ -130,3 +130,68 @@ export function exportSessionMarkdown(data: SessionData): string {
 export function getSessionDir(): string {
   return SESSION_DIR;
 }
+
+const SETTINGS_PATH = join(
+  process.env.HOME || process.env.USERPROFILE || ".",
+  ".aura-core",
+  "settings.json",
+);
+
+export interface GlobalSettings {
+  lastProvider: string | null;
+  lastModel: string | null;
+  lastReasoning: string | null;
+}
+
+export function loadGlobalSettings(): GlobalSettings {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return { lastProvider: null, lastModel: null, lastReasoning: null };
+    return JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as GlobalSettings;
+  } catch {
+    return { lastProvider: null, lastModel: null, lastReasoning: null };
+  }
+}
+
+export function saveGlobalSettings(settings: GlobalSettings): void {
+  try {
+    const dir = join(process.env.HOME || process.env.USERPROFILE || ".", ".aura-core");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf-8");
+  } catch {
+    /* swallow */
+  }
+}
+
+export interface SessionSummary {
+  name: string;
+  timestamp: number;
+  provider: string;
+  model: string;
+  reasoningEffort: string;
+  messageCount: number;
+}
+
+export function listSessionsDetailed(): SessionSummary[] {
+  ensureSessionDir();
+  const files = readdirSync(SESSION_DIR).filter((f) => f.endsWith(".json"));
+  const sessions: SessionSummary[] = [];
+  for (const file of files) {
+    try {
+      const content = readFileSync(join(SESSION_DIR, file), "utf-8");
+      const data = JSON.parse(content) as SessionData;
+      const conv = data.conversation as Array<unknown> | undefined;
+      sessions.push({
+        name: file.replace(/\.json$/, ""),
+        timestamp: data.timestamp,
+        provider: data.provider,
+        model: data.model,
+        reasoningEffort: data.reasoningEffort,
+        messageCount: conv?.length ?? 0,
+      });
+    } catch {
+      continue;
+    }
+  }
+  sessions.sort((a, b) => b.timestamp - a.timestamp);
+  return sessions;
+}
