@@ -290,35 +290,6 @@ a{color:inherit;text-decoration:none}
 .provider-table tbody tr:hover td{background:rgba(255,255,255,.02)}
 .p-name{font-weight:600}
 
-/* ─── Comparison ─── */
-.comp-table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid rgba(255,255,255,.04);margin-bottom:20px}
-.comp-table{width:100%;border-collapse:collapse;font-size:13.5px}
-.comp-table th,.comp-table td{
-  padding:14px 18px;text-align:left;
-  border-bottom:1px solid rgba(255,255,255,.03);
-  white-space:nowrap
-}
-.comp-table thead th{
-  font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--fg3);background:rgba(0,0,0,.2);padding:14px 18px
-}
-.comp-table thead th:first-child{color:var(--fg)}
-.comp-table tbody tr{transition:background .12s}
-.comp-table tbody tr:hover td{background:rgba(255,255,255,.02)}
-.comp-table tbody tr:last-child td{border-bottom:none}
-.th-this{color:var(--accent2)!important}
-.td-this{color:var(--accent2);font-weight:600;font-family:'JetBrains Mono',monospace}
-.td-yes{color:var(--green)!important;font-weight:600}
-.td-no{color:var(--fg3)!important}
-.ft{color:var(--fg);font-weight:500}
-.t-note{color:var(--fg3);font-size:11px;font-weight:400}
-.comp-note{
-  font-size:13px;color:var(--fg3);line-height:1.7;
-  padding:20px 24px;background:var(--bg3);border-radius:var(--radius-sm);
-  border:1px solid rgba(255,255,255,.04)
-}
-.comp-note strong{color:var(--fg2)}
-
 /* ─── Code Tabs ─── */
 .code-tabs{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:800px;margin:0 auto}
 @media(max-width:700px){.code-tabs{grid-template-columns:1fr}}

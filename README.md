@@ -232,26 +232,6 @@ Create a task in `.vscode/tasks.json`:
 
 ---
 
-## Comparison
-
-| Feature | aura-core | Claude Code | Codex CLI | opencode |
-|---|---|---|---|---|
-| Providers | 12+ | 1 (Anthropic) | 1 (Anthropic) | 7+ |
-| Open Source | ✓ MIT | ✗ | ✓ Apache 2.0 | ✓ Apache 2.0 |
-| Self-Healing | ✓ | ✓ | ✗ | ✗ |
-| Interactive Command Picker | ✓ | ✓ | ✗ | ✗ |
-| Gradient UI / Tables / Spinners | ✓ | ✗ | ✗ | ✗ |
-| Session Auto-Save | ✓ | ✓ | ✗ | ✓ |
-| Session Resume | ✓ | ✓ | ✗ | ✓ |
-| File Watching | ✓ | ✗ | ✗ | ✗ |
-| Web Search | ✓ | ✓ | ✓ | ✓ |
-| PR Creation | ✓ | ✗ | ✓ | ✗ |
-| API Key Persist | ✓ | ✗ | ✗ | ✗ |
-| Custom Provider Support | ✓ | ✗ | ✗ | ✓ |
-| Sub-Agent Spawning | ✓ | ✓ | ✓ | ✓ |
-| Ask User Prompts | ✓ | ✗ | ✗ | ✗ |
-| Project Detection | 15 types | — | — | — |
-
 ---
 
 ## Architecture
