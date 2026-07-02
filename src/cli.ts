@@ -408,7 +408,7 @@ async function getApiKeyForProvider(provider: Provider, globalSettings?: GlobalS
   const input = await p.text({
     message: `Enter ${pBadge(provider)} API key`,
     placeholder: "...",
-    validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+    validate: (v) => { if (!v?.trim()) return "Required"; return undefined; },
   });
   if (p.isCancel(input)) return null;
   return (input as string).trim();
@@ -480,14 +480,14 @@ async function handleProviderSwitch(state: ReplState, workdir: string): Promise<
     const baseURLInput = await p.text({
       message: `${pBadge(newProvider)} Enter API base URL`,
       placeholder: "https://api.example.com/v1",
-      validate: (v) => { if (!v.trim()) return "Required"; if (!v.trim().startsWith("http")) return "Must start with http:// or https://"; return undefined; },
+      validate: (v) => { if (!v?.trim()) return "Required"; if (!v?.startsWith("http")) return "Must start with http:// or https://"; return undefined; },
     });
     if (p.isCancel(baseURLInput)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
     customBaseURL = (baseURLInput as string).trim().replace(/\/$/, "");
     const modelName = await p.text({
       message: `${pBadge(newProvider)} Enter model name`,
       placeholder: "gpt-4o",
-      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+      validate: (v) => { if (!v?.trim()) return "Required"; return undefined; },
     });
     if (p.isCancel(modelName)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
     modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[newProvider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[newProvider].supportsReasoning, provider: newProvider };
@@ -518,7 +518,7 @@ async function handleModelSwitch(state: ReplState, workdir: string): Promise<voi
     const modelName = await p.text({
       message: `${pBadge(state.config.provider)} Enter model name`,
       placeholder: "gpt-4o",
-      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+      validate: (v) => { if (!v?.trim()) return "Required"; return undefined; },
     });
     if (p.isCancel(modelName)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
     modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[state.config.provider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[state.config.provider].supportsReasoning, provider: state.config.provider };
@@ -845,7 +845,7 @@ async function handleBranch(state: ReplState): Promise<void> {
     const r = await gitCheckout(target as string, workdir);
     console.log(`\n  ${r.success ? pc.green("✓") : pc.red("✗")} ${r.message}\n`);
   } else if (action === "create") {
-    const nameInput = await p.text({ message: "New branch name:", validate: (v) => { if (!v.trim()) return "Required"; return undefined; } });
+    const nameInput = await p.text({ message: "New branch name:", validate: (v) => { if (!v?.trim()) return "Required"; return undefined; } });
     if (p.isCancel(nameInput)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
     const r = await gitCreateBranch((nameInput as string).trim(), workdir);
     console.log(`\n  ${r.success ? pc.green("✓") : pc.red("✗")} ${r.message}\n`);
@@ -948,7 +948,7 @@ function handleInit(state: ReplState): void {
 async function handleSave(state: ReplState, args: string): Promise<void> {
   let name = args.trim();
   if (!name) {
-    const input = await p.text({ message: "Session name:", validate: (v) => { if (!v.trim()) return "Required"; return undefined; } });
+    const input = await p.text({ message: "Session name:", validate: (v) => { if (!v?.trim()) return "Required"; return undefined; } });
     if (p.isCancel(input)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
     name = (input as string).trim();
   }
@@ -1054,7 +1054,7 @@ async function handleResume(state: ReplState): Promise<void> {
 }
 
 async function handleExport(state: ReplState): Promise<void> {
-  const input = await p.text({ message: "Export filename:", defaultValue: "aura-export.md", validate: (v) => { if (!v.trim()) return "Required"; return undefined; } });
+  const input = await p.text({ message: "Export filename:", defaultValue: "aura-export.md", validate: (v) => { if (!v?.trim()) return "Required"; return undefined; } });
   if (p.isCancel(input)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
   const filename = (input as string).trim();
   const data = {
@@ -1798,7 +1798,7 @@ async function main(): Promise<void> {
     const baseURLInput = await p.text({
       message: `${pBadge(provider)} Enter API base URL`,
       placeholder: "https://api.example.com/v1",
-      validate: (v) => { if (!v.trim()) return "Required"; if (!v.trim().startsWith("http")) return "Must start with http:// or https://"; return undefined; },
+      validate: (v) => { if (!v?.trim()) return "Required"; if (!v?.startsWith("http")) return "Must start with http:// or https://"; return undefined; },
     });
     if (p.isCancel(baseURLInput)) process.exit(1);
     customBaseURL = (baseURLInput as string).trim().replace(/\/$/, "");
@@ -1806,7 +1806,7 @@ async function main(): Promise<void> {
     const modelName = await p.text({
       message: `${pBadge(provider)} Enter model name`,
       placeholder: "gpt-4o",
-      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+      validate: (v) => { if (!v?.trim()) return "Required"; return undefined; },
     });
     if (p.isCancel(modelName)) process.exit(1);
     modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[provider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider };

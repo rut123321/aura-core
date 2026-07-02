@@ -100,10 +100,6 @@ const COL = {
   cyan: (s: string) => `\x1b[38;2;86;182;194m${s}\x1b[39m`,
 };
 
-function clearLine(): void {
-  process.stdout.write("\r\x1b[2K\r");
-}
-
 class BrailleSpinner {
   private colorFn: (s: string) => string;
   private active = false;
@@ -585,8 +581,6 @@ export class Agent {
     const spinner = new BrailleSpinner("Thinking...", c);
     let firstText = true;
     let firstThinking = true;
-    const thinkingStart = Date.now();
-    let thinkingTitle = "";
 
     const effort = this.config.reasoningEffort;
     const maxTokens = effort !== "off"
@@ -615,35 +609,17 @@ export class Agent {
 
     const effortLabels: Record<string, string> = { low: "Quick", medium: "Balanced", high: "Deep", max: "Maximum" };
 
-    stream.on("thinking", (thinking: string) => {
-      if (firstThinking) {
-        firstThinking = false;
-        thinkingTitle = thinking.slice(0, 80).replace(/\n/g, " ");
-        if (firstText) {
-          spinner.setText(`${effortLabels[effort] ?? "Deep"} reasoning...`);
-          firstText = false;
-        } else {
-          clearLine();
-          console.log(`   ${COL.orange("-")} ${COL.orange("Reasoning:")} ${pc.gray(thinkingTitle)}`);
-        }
-      }
-      spinner.setText(`Reasoning...`);
-      if (thinking.length > 20) {
-        const preview = thinking.slice(0, 60).replace(/\n/g, " ");
-        spinner.setText(`Reasoning: ${preview}...`);
-      }
+    stream.on("thinking", (_thinking: string) => {
+      if (!firstThinking) return;
+      firstThinking = false;
+      spinner.setText(`${effortLabels[effort] ?? "Deep"} reasoning...`);
     });
 
     stream.on("text", (text: string) => {
       if (firstText) {
         spinner.stop();
         firstText = false;
-        if (!firstThinking) {
-          const dur = ((Date.now() - thinkingStart) / 1000).toFixed(1);
-          clearLine();
-          console.log(`   ${COL.orange("-")} ${COL.orange("Thought:")} ${pc.gray(thinkingTitle)} ${pc.gray("|")} ${pc.gray(dur + "s")}`);
-        }
-        process.stdout.write(`\n   ${c(text)}`);
+        process.stdout.write(`\r\n   ${c(text)}`);
       } else {
         process.stdout.write(text);
       }
@@ -736,12 +712,10 @@ export class Agent {
         const reasoningDelta = delta.reasoning_content as string | undefined;
         if (reasoningDelta) {
           reasoningContent += reasoningDelta;
-          const clean = reasoningDelta.replace(/\n/g, " ");
           if (firstReasoning) {
             firstReasoning = false;
-            clearLine();
+            spinner.setText("Reasoning...");
           }
-          spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
         }
 
         if (delta.content) {
