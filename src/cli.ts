@@ -231,6 +231,36 @@ function nextPlaceholder(): string {
   return p;
 }
 
+function formatMsgPreview(content: unknown, maxLen: number = 120): string {
+  if (typeof content === "string") {
+    return content.replace(/\n/g, " ").slice(0, maxLen);
+  }
+  if (Array.isArray(content)) {
+    const textBlocks = content.filter((b: Record<string, unknown>) => b.type === "text");
+    if (textBlocks.length > 0) return (textBlocks[0].text as string).replace(/\n/g, " ").slice(0, maxLen);
+    const toolBlocks = content.filter((b: Record<string, unknown>) => b.type === "tool_use");
+    if (toolBlocks.length > 0) return `[tool: ${toolBlocks.length} calls]`;
+  }
+  return "";
+}
+
+function printPreviousConversation(conv: unknown[]): void {
+  const msgs = conv as Array<{ role: string; content: unknown }>;
+  const toShow = msgs.filter(m => m.role === "user" || m.role === "assistant").slice(-6);
+  if (toShow.length === 0) return;
+  console.log(`  ${pc.gray("─".repeat(40))}`);
+  for (const m of toShow) {
+    if (m.role === "user") {
+      console.log(`  ${pc.cyan("\u25B6")} ${pc.white(formatMsgPreview(m.content))}`);
+    } else {
+      const preview = formatMsgPreview(m.content);
+      if (preview) console.log(`  ${pc.green("\u25A0")} ${pc.gray(preview)}`);
+    }
+  }
+  console.log(`  ${pc.gray("─".repeat(40))}`);
+  console.log();
+}
+
 function printReplHeader(): void {
   console.log(pc.gray("  type your task, or use /diff /commit /add /save /review /test /cost /help /exit"));
   console.log();
@@ -800,7 +830,7 @@ async function handleLoad(state: ReplState, args: string): Promise<void> {
   state.agent.setConversation(data.conversation as typeof state.agent.getConversation extends () => infer R ? R : never);
   if (data.reasoningEffort) state.config.reasoningEffort = data.reasoningEffort;
   console.log(`\n  ${pc.green("✓")} ${pc.green("Loaded:")} ${pc.white(name)} ${pc.gray(`(${data.conversation.length} messages)`)}`);
-  console.log();
+  printPreviousConversation(data.conversation);
 }
 
 function handleSessionsList(): void {
@@ -839,7 +869,7 @@ async function handleResume(state: ReplState): Promise<void> {
   state.agent.setConversation(data.conversation as typeof state.agent.getConversation extends () => infer R ? R : never);
   if (data.reasoningEffort) state.config.reasoningEffort = data.reasoningEffort;
   console.log(`\n  ${pc.green("✓")} ${pc.green("Resumed:")} ${pc.white(name)} ${pc.gray(`(${data.conversation.length} messages)`)}`);
-  console.log();
+  printPreviousConversation(data.conversation);
 }
 
 async function handleExport(state: ReplState): Promise<void> {
@@ -1478,6 +1508,7 @@ async function main(): Promise<void> {
             agent.setConversation(data.conversation as ReturnType<Agent["getConversation"]>);
             if (data.reasoningEffort) config.reasoningEffort = data.reasoningEffort;
             console.log(`\n  ${pc.green("✓")} ${pc.green(`Resumed: ${name}`)} ${pc.gray(`(${data.conversation.length} messages)`)}`);
+            printPreviousConversation(data.conversation);
           }
         }
       }
