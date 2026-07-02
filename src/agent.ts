@@ -681,7 +681,7 @@ export class Agent {
           clearLine();
           console.log(`   ${COL.orange("-")} ${COL.orange("Thought:")} ${pc.gray(thinkingTitle)} ${pc.gray("\xB7")} ${pc.gray(dur + "s")}`);
         }
-        process.stdout.write(`   ${c(text)}`);
+        process.stdout.write(`\n   ${c(text)}`);
       } else {
         process.stdout.write(text);
       }
@@ -778,26 +778,18 @@ export class Agent {
           const clean = reasoningDelta.replace(/\n/g, " ");
           if (firstReasoning) {
             firstReasoning = false;
-            spinner.stop();
-            if (firstText) firstText = false;
             clearLine();
-            spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
-          } else {
-            spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
           }
+          spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
         }
 
         if (delta.content) {
           const text = delta.content as string;
           textContent += text;
-          if (firstReasoning && firstText) {
-            spinner.stop();
-            firstText = false;
-          }
           if (firstText) {
             spinner.stop();
             firstText = false;
-            process.stdout.write(`   ${c(text)}`);
+            process.stdout.write(`\n   ${c(text)}`);
           } else {
             process.stdout.write(text);
           }

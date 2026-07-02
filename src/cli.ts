@@ -242,17 +242,14 @@ function printHelp(): void {
 function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEffort): void {
   const c = pColor(model.provider);
   console.log();
-  console.log(`  ${pc.gray("\u2503")} ${pc.bold(c(model.label))} ${pc.gray(model.id)}`);
-  if (model.contextLength) {
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("context")} ${pc.white(model.contextLength.toLocaleString())} ${pc.gray("tokens")}`);
-  }
-  if (effort !== "off") {
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("reasoning")} ${reasonBadge(effort)}`);
-  }
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray(workdir)}`);
+  const info: string[] = [pc.bold(c(model.label))];
+  if (model.contextLength) info.push(`${pc.gray("ctx")} ${pc.white(model.contextLength.toLocaleString())}`);
+  if (effort !== "off") info.push(reasonBadge(effort));
+  info.push(pc.gray(workdir));
+  console.log(`   ${info.join(` ${pc.gray("\u00B7")} `)}`);
   const initFile = loadInitFile(workdir);
   if (initFile) {
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("AURA.md loaded")}`);
+    console.log(`   ${pc.gray("\u25C9")} ${pc.gray("AURA.md loaded")}`);
   }
   console.log();
 }
