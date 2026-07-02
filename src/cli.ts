@@ -41,15 +41,9 @@ const VERSION = "2.1.0";
 
 const BANNER_LINES = [
   "",
-  `  ${pc.cyan("\u2588\u2580\u2588\u2580\u2580\u2580\u2580\u2557")}${pc.magenta("\u2588\u2588\u2557")}   ${pc.magenta("\u2588\u2588\u2557")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")} ${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2557")}  `,
-  `  ${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")} `,
-  `  ${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u2557")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2551")} `,
-  `  ${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")} `,
-  `  ${pc.cyan("\u2588\u2588\u2551")}  ${pc.cyan("\u2588\u2588\u2551")}${pc.magenta("\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u255D")}${pc.magenta("\u255A\u2588\u2588\u2588\u2588\u2588\u255D")}${pc.cyan("\u2588\u2588\u2551")}  ${pc.cyan("\u2588\u2588\u2551")}${pc.magenta("\u2588\u2588\u2551")}  ${pc.magenta("\u2588\u2588\u2551")} `,
-  `  ${pc.cyan("\u255A\u2550\u255D")}  ${pc.cyan("\u255A\u2550\u255D")}${pc.magenta(" \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D")} ${pc.magenta("\u255A\u2550\u2550\u2550\u2550\u2550\u255D")}${pc.cyan("\u255A\u2550\u255D")}  ${pc.cyan("\u255A\u2550\u255D")}${pc.magenta("\u255A\u2550\u255D")}  ${pc.magenta("\u255A\u2550\u255D")} `,
-  "",
-  `  ${pc.dim(pc.white("autonomous ai coding agent"))}  ${pc.bold(pc.magenta("v" + VERSION))}`,
-  `  ${pc.dim("github.com/rut123321/aura-core")}`,
+  pc.cyan("  AURA") + pc.magenta(" CORE"),
+  pc.dim(pc.white("  autonomous ai coding agent")) + pc.bold(pc.magenta("  v" + VERSION)),
+  pc.dim("  github.com/rut123321/aura-core"),
   "",
 ];
 
@@ -246,10 +240,10 @@ function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEf
   if (model.contextLength) info.push(`${pc.gray("ctx")} ${pc.white(model.contextLength.toLocaleString())}`);
   if (effort !== "off") info.push(reasonBadge(effort));
   info.push(pc.gray(workdir));
-  console.log(`   ${info.join(` ${pc.gray("\u00B7")} `)}`);
+  console.log(`   ${info.join(` ${pc.gray("|")} `)}`);
   const initFile = loadInitFile(workdir);
   if (initFile) {
-    console.log(`   ${pc.gray("\u25C9")} ${pc.gray("AURA.md loaded")}`);
+    console.log(`   ${pc.gray("*")} ${pc.gray("AURA.md loaded")}`);
   }
   console.log();
 }
@@ -307,7 +301,7 @@ function printPreviousConversation(conv: unknown[]): void {
 
 function printReplHeader(): void {
   const g = pc.gray, c = pc.cyan;
-  console.log(g("  ") + c("\u25C9 ") + g("ready") + g(" \u00B7 ") + g("type your task or") + c(" /") + g(" for commands"));
+  console.log(g("  ") + c("o ") + g("ready") + g(" | ") + g("type your task or") + c(" /") + g(" for commands"));
   console.log();
 }
 
@@ -345,7 +339,7 @@ function printStatusBar(state: ReplState): void {
     parts.push(pc.gray(`${historyLen} msgs`));
   }
 
-  console.log(pc.gray("  \u2500") + " " + parts.join(pc.gray(" \u00B7 ")));
+  console.log(pc.gray("  -") + " " + parts.join(pc.gray(" | ")));
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
