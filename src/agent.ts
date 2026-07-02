@@ -117,6 +117,11 @@ class BrailleSpinner {
     this.colorFn = colorFn;
   }
 
+  setText(text: string): void {
+    this.text = text;
+    if (this.timer) this.render();
+  }
+
   start(): void {
     this.frameIdx = 0;
     this.render();
@@ -170,33 +175,60 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
     case "search_files": return `Grep "${(input.pattern as string) ?? ""}"`;
     case "glob": return `Glob "${(input.pattern as string) ?? ""}"`;
     case "ask_user": return `Ask "${((input.question as string) ?? "").slice(0, 50)}"`;
+    case "web_search": return `Search "${((input.query as string) ?? "").slice(0, 50)}"`;
     default: return name;
   }
 }
 
+const TOOL_SPINNER_FRAMES = ["\u25D4", "\u25D0", "\u25D5", "\u25D1"];
+let toolSpinnerTimer: ReturnType<typeof setInterval> | null = null;
+let toolSpinnerFrame = 0;
+let toolSpinnerLabel = "";
+let toolSpinnerColor: (s: string) => string = pc.gray;
+
+function clearToolSpinner(): void {
+  if (toolSpinnerTimer) { clearInterval(toolSpinnerTimer); toolSpinnerTimer = null; }
+}
+
+function renderToolSpinner(): void {
+  const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
+  toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
+  process.stdout.write(`\r   ${toolSpinnerColor(frame)} ${pc.gray(toolSpinnerLabel)}`);
+}
+
 function printToolPending(name: string, input: Record<string, unknown>): void {
+  clearToolSpinner();
   const glyph = toolGlyph(name);
   const color = toolColor(name);
   const label = toolLabel(name, input);
-  process.stdout.write(`     ${color(glyph)} ${pc.gray(label)}\r`);
+  toolSpinnerLabel = `${color(glyph)} ${pc.dim(label)}`;
+  toolSpinnerColor = color;
+  toolSpinnerFrame = 0;
+  renderToolSpinner();
+  toolSpinnerTimer = setInterval(() => {
+    toolSpinnerFrame = (toolSpinnerFrame + 1) % TOOL_SPINNER_FRAMES.length;
+    const frame = TOOL_SPINNER_FRAMES[toolSpinnerFrame];
+    process.stdout.write(`\r   ${toolSpinnerColor(frame)} ${toolSpinnerLabel}`);
+  }, 120);
 }
 
 function printToolDone(name: string, input: Record<string, unknown>, success: boolean, detail?: string): void {
-  const glyph = toolGlyph(name);
+  clearToolSpinner();
   const color = success ? toolColor(name) : COL.red;
   const label = toolLabel(name, input);
   const detailStr = detail ? ` ${pc.gray(detail)}` : "";
-  const line = `     ${color(glyph)} ${success ? pc.gray(label) : COL.red(label)}${detailStr}`;
-  process.stdout.write(`\r${" ".repeat(70)}\r`);
+  const icon = success ? color("\u2713") : COL.red("\u2717");
+  const line = `   ${icon} ${success ? pc.gray(label) : COL.red(label)}${detailStr}`;
+  process.stdout.write(`\r${" ".repeat(80)}\r`);
   console.log(line);
 }
 
 function printToolError(name: string, input: Record<string, unknown>, error: string): void {
-  const glyph = toolGlyph(name);
+  clearToolSpinner();
   const label = toolLabel(name, input);
-  process.stdout.write(`\r${" ".repeat(70)}\r`);
-  console.log(`     ${COL.red(glyph)} ${COL.red(label)}`);
-  console.log(`       ${COL.red(error.slice(0, 100))}`);
+  process.stdout.write(`\r${" ".repeat(80)}\r`);
+  console.log(`   ${COL.red("\u2717")} ${COL.red(label)}`);
+  console.log(`     ${COL.red(error.slice(0, 100))}`);
 }
 
 interface OpenAIToolCallAcc {
@@ -559,9 +591,11 @@ export class Agent {
     if (this.iterations >= MAX_ITERATIONS) {
       console.log(`\n   ${COL.orange("\u25B3")} ${COL.orange("Max iterations")} ${pc.gray(`(${MAX_ITERATIONS})`)}`);
     }
+    clearToolSpinner();
   }
 
   private async streamResponse(): Promise<RawMessage> {
+    clearToolSpinner();
     if (this.config.providerType === "anthropic") {
       return await this.streamAnthropic();
     }
@@ -615,16 +649,24 @@ export class Agent {
       throw new Error(`Failed to start stream: ${error instanceof Error ? error.message : String(error)}`);
     }
 
+    const effortLabels: Record<string, string> = { low: "Quick", medium: "Balanced", high: "Deep", max: "Maximum" };
+
     stream.on("thinking", (thinking: string) => {
       if (firstThinking) {
         firstThinking = false;
         thinkingTitle = thinking.slice(0, 80).replace(/\n/g, " ");
         if (firstText) {
-          spinner.stop();
+          spinner.setText(`${effortLabels[effort] ?? "Deep"} reasoning...`);
           firstText = false;
+        } else {
+          clearLine();
+          console.log(`   ${COL.orange("\u2823")} ${COL.orange("Reasoning:")} ${pc.gray(thinkingTitle)}`);
         }
-        clearLine();
-        console.log(`   ${COL.orange("\u2823")} ${COL.orange("Thinking:")} ${pc.gray(thinkingTitle)}`);
+      }
+      spinner.setText(`Reasoning...`);
+      if (thinking.length > 20) {
+        const preview = thinking.slice(0, 60).replace(/\n/g, " ");
+        spinner.setText(`Reasoning: ${preview}...`);
       }
     });
 
@@ -698,6 +740,7 @@ export class Agent {
 
     if (effort !== "off") {
       reqParams.reasoning_effort = effort === "max" ? "high" : effort;
+      spinner.setText("Reasoning...");
     }
 
     let textContent = "";
@@ -730,12 +773,15 @@ export class Agent {
         const reasoningDelta = delta.reasoning_content as string | undefined;
         if (reasoningDelta) {
           reasoningContent += reasoningDelta;
+          const clean = reasoningDelta.replace(/\n/g, " ");
           if (firstReasoning) {
             firstReasoning = false;
             spinner.stop();
             if (firstText) firstText = false;
             clearLine();
-            console.log(`   ${COL.orange("\u2823")} ${COL.orange("Reasoning:")} ${pc.gray(reasoningDelta.slice(0, 80).replace(/\n/g, " "))}`);
+            spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
+          } else {
+            spinner.setText(`Reasoning: ${clean.slice(0, 80)}`);
           }
         }
 
@@ -749,9 +795,6 @@ export class Agent {
           if (firstText) {
             spinner.stop();
             firstText = false;
-            if (!firstReasoning) {
-              clearLine();
-            }
             process.stdout.write(`   ${c(text)}`);
           } else {
             process.stdout.write(text);
