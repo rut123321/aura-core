@@ -5,7 +5,10 @@
 ### Added
 - Session resume: startup prompt asks to resume a previous session when sessions exist
 - `/resume` command in REPL — pick and load a saved session interactively
-- Global settings persistence: last used provider, model, reasoning effort saved to `~/.aura-core/settings.json`, auto-restored on next launch
+- Global settings persistence: last used provider, model, reasoning effort, API key saved to `~/.aura-core/settings.json`, auto-restored on next launch
+- Auto-save sessions after every REPL interaction (named `auto-{timestamp}`, keeps last 10)
+- Auto-save on exit (Ctrl+C / `exit` command)
+- API key saved in settings when entered interactively (not from env var)
 - New project types: Elixir, .NET/C#, Swift, PHP, Deno, C/C++ (CMake, Makefile)
 - Gradle support alongside Maven for Java projects
 - `minimatch` library for proper glob pattern matching (supports `{a,b}`, `[!abc]`, `[0-9]`)

@@ -16,8 +16,9 @@ import {
 } from "./git";
 import {
   saveSession, loadSession, listSessions, listSessionsDetailed, exportSessionMarkdown, getSessionDir,
-  loadGlobalSettings, saveGlobalSettings,
+  loadGlobalSettings, saveGlobalSettings, autoSaveSession,
 } from "./session";
+import type { GlobalSettings } from "./session";
 
 import {
   addContextFile, dropContextFile, getContextFiles, clearContextFiles,
@@ -280,9 +281,12 @@ function getApiKeyFromEnv(provider: Provider): string | null {
   return null;
 }
 
-async function getApiKeyForProvider(provider: Provider): Promise<string | null> {
+async function getApiKeyForProvider(provider: Provider, globalSettings?: GlobalSettings): Promise<string | null> {
   const envKey = getApiKeyFromEnv(provider);
   if (envKey) return envKey;
+  if (globalSettings?.lastApiKey && globalSettings?.lastApiKeyProvider === provider) {
+    return globalSettings.lastApiKey;
+  }
   const envVar = PROVIDERS[provider].apiKeyEnv[0];
   console.log(`  ${pc.yellow("⚠")}  ${pc.gray(envVar)} ${pc.yellow("not found")}\n`);
   const input = await p.text({
@@ -1208,6 +1212,7 @@ async function runRepl(state: ReplState): Promise<void> {
   let sigintHandler: (() => void) | null = null;
   const setupSigint = () => {
     sigintHandler = () => {
+      autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
       state.agent.interrupt();
     };
     process.on("SIGINT", sigintHandler);
@@ -1223,6 +1228,7 @@ async function runRepl(state: ReplState): Promise<void> {
     });
 
     if (p.isCancel(input)) {
+      autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
       clearScreen(); printBanner();
       console.log(pc.gray("  goodbye"));
       console.log();
@@ -1233,6 +1239,7 @@ async function runRepl(state: ReplState): Promise<void> {
     if (!raw) continue;
 
     if (raw === "exit" || raw === "quit" || raw === ":q") {
+      autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
       clearScreen(); printBanner();
       console.log(pc.gray("  goodbye"));
       console.log();
@@ -1328,6 +1335,7 @@ async function runRepl(state: ReplState): Promise<void> {
 
     await state.agent.run(processedPrompt);
     console.log();
+    autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
     
     console.log();
   }
@@ -1371,7 +1379,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const apiKey = await getApiKeyForProvider(provider);
+  const apiKey = await getApiKeyForProvider(provider, globalSettings);
   if (!apiKey) {
     console.log(`\n  ${pc.red("✗")} ${pc.red(`Set ${PROVIDERS[provider].apiKeyEnv[0]}`)}\n`);
     process.exit(1);
@@ -1435,10 +1443,13 @@ async function main(): Promise<void> {
   const confirmFn = createConfirmFn(config.autoConfirm);
   const agent = new Agent(config, confirmFn);
 
+  const keyFromEnv = getApiKeyFromEnv(provider);
   saveGlobalSettings({
     lastProvider: provider,
     lastModel: modelInfo.id,
     lastReasoning: reasoning,
+    lastApiKey: keyFromEnv ? null : apiKey,
+    lastApiKeyProvider: keyFromEnv ? null : provider,
   });
 
   if (parsed.instruction) {

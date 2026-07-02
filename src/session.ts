@@ -141,14 +141,24 @@ export interface GlobalSettings {
   lastProvider: string | null;
   lastModel: string | null;
   lastReasoning: string | null;
+  lastApiKey: string | null;
+  lastApiKeyProvider: string | null;
 }
+
+const DEFAULT_SETTINGS: GlobalSettings = {
+  lastProvider: null,
+  lastModel: null,
+  lastReasoning: null,
+  lastApiKey: null,
+  lastApiKeyProvider: null,
+};
 
 export function loadGlobalSettings(): GlobalSettings {
   try {
-    if (!existsSync(SETTINGS_PATH)) return { lastProvider: null, lastModel: null, lastReasoning: null };
-    return JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as GlobalSettings;
+    if (!existsSync(SETTINGS_PATH)) return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) } as GlobalSettings;
   } catch {
-    return { lastProvider: null, lastModel: null, lastReasoning: null };
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
@@ -159,6 +169,36 @@ export function saveGlobalSettings(settings: GlobalSettings): void {
     writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf-8");
   } catch {
     /* swallow */
+  }
+}
+
+export function autoSaveSession(agent: { getConversation: () => unknown[]; getConfig: () => unknown }, modelInfo: { provider: string; label: string; id: string }, reasoningEffort: string): void {
+  const ts = Date.now();
+  const name = `auto-${new Date(ts).toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+  const conv = agent.getConversation();
+  if (conv.length === 0) return;
+  const data = {
+    name,
+    conversation: conv as unknown[],
+    config: agent.getConfig() as Record<string, unknown>,
+    modelInfo: modelInfo as Record<string, unknown>,
+    timestamp: ts,
+    provider: modelInfo.provider,
+    model: modelInfo.id,
+    reasoningEffort,
+  };
+  saveSession(name, data as SessionData);
+  trimAutoSessions(10);
+}
+
+export function trimAutoSessions(maxCount: number): void {
+  ensureSessionDir();
+  const files = readdirSync(SESSION_DIR)
+    .filter(f => f.startsWith("auto-") && f.endsWith(".json"))
+    .sort();
+  while (files.length > maxCount) {
+    const oldest = files.shift()!;
+    try { unlinkSync(join(SESSION_DIR, oldest)); } catch { /* */ }
   }
 }
 

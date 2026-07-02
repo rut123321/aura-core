@@ -70,6 +70,7 @@ It supports **10 AI providers**, **50+ models**, and comes with **8 native tools
 | `/init` | Create AURA.md project context |
 | `/save` `[name]` | Save session |
 | `/load` `[name]` | Load session |
+| `/resume` | Pick a saved session to resume |
 | `/sessions` | List saved sessions |
 | `/export` | Export to Markdown |
 | `/todo` | Task management |
