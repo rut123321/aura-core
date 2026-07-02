@@ -13,6 +13,15 @@ import {
   REASONING_LABELS,
 } from "./types";
 import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
+
+// @ts-ignore - intentional console.log override for Windows \r\n compat
+console.log = function (...args: unknown[]) {
+  process.stdout.write(args.map(a => typeof a === "string" ? a : String(a)).join(" ") + "\r\n");
+};
+// @ts-ignore
+console.error = function (...args: unknown[]) {
+  process.stderr.write(args.map(a => typeof a === "string" ? a : String(a)).join(" ") + "\r\n");
+};
 import {
   isGitRepo, getGitDiff, getGitDiffStat, gitCommit, gitUndo,
   gitLog, gitBranch, gitCheckout, gitCreateBranch, gitChangesSummary,
