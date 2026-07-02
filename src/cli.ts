@@ -3,7 +3,6 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import ora from "ora";
 import boxen from "boxen";
-import gradient from "gradient-string";
 import Table from "cli-table3";
 import { Agent } from "./agent";
 import { selectModelInteractive } from "./models";
@@ -40,34 +39,19 @@ import { join } from "node:path";
 
 const VERSION = "2.1.0";
 
-const bannerGradient = gradient(["#6366f1", "#a855f7", "#06b6d4", "#22d3ee"]);
-
-function makeBanner(): string[] {
-  const logo = [
-    "  █████╗ ██╗   ██╗██████╗  █████╗  ",
-    "  ██╔══██╗██║   ██║██╔══██╗██╔══██╗ ",
-    "  ███████║██║   ██║██████╔╝███████║ ",
-    "  ██╔══██║██║   ██║██╔══██╗██╔══██║ ",
-    "  ██║  ██║╚██████╔╝██║  ██║██║  ██║ ",
-    "  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ",
-  ];
-  const gradientLogo = logo.map(l => "  " + bannerGradient(l));
-  return [
-    "",
-    gradientLogo[0],
-    gradientLogo[1],
-    gradientLogo[2],
-    gradientLogo[3],
-    gradientLogo[4],
-    gradientLogo[5],
-    "",
-    pc.dim(`  ${pc.bold(pc.white("autonomous ai coding agent"))}  ${pc.bold(pc.magenta("v" + VERSION))}`),
-    pc.dim(`  github.com/rut123321/aura-core`),
-    "",
-  ];
-}
-
-const BANNER = makeBanner();
+const BANNER_LINES = [
+  "",
+  `  ${pc.cyan("\u2588\u2580\u2588\u2580\u2580\u2580\u2580\u2557")}${pc.magenta("\u2588\u2588\u2557")}   ${pc.magenta("\u2588\u2588\u2557")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")} ${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2557")}  `,
+  `  ${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")} `,
+  `  ${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2557")}${pc.magenta("\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u2557")}${pc.cyan("\u2588\u2588\u2588\u2588\u2588\u2588\u2551")} `,
+  `  ${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2551")}   ${pc.magenta("\u2588\u2588\u2551")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D")}${pc.magenta("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")}${pc.cyan("\u2588\u2588\u2554\u2550\u2550\u2550\u255D")} `,
+  `  ${pc.cyan("\u2588\u2588\u2551")}  ${pc.cyan("\u2588\u2588\u2551")}${pc.magenta("\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u255D")}${pc.magenta("\u255A\u2588\u2588\u2588\u2588\u2588\u255D")}${pc.cyan("\u2588\u2588\u2551")}  ${pc.cyan("\u2588\u2588\u2551")}${pc.magenta("\u2588\u2588\u2551")}  ${pc.magenta("\u2588\u2588\u2551")} `,
+  `  ${pc.cyan("\u255A\u2550\u255D")}  ${pc.cyan("\u255A\u2550\u255D")}${pc.magenta(" \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D")} ${pc.magenta("\u255A\u2550\u2550\u2550\u2550\u2550\u255D")}${pc.cyan("\u255A\u2550\u255D")}  ${pc.cyan("\u255A\u2550\u255D")}${pc.magenta("\u255A\u2550\u255D")}  ${pc.magenta("\u255A\u2550\u255D")} `,
+  "",
+  `  ${pc.dim(pc.white("autonomous ai coding agent"))}  ${pc.bold(pc.magenta("v" + VERSION))}`,
+  `  ${pc.dim("github.com/rut123321/aura-core")}`,
+  "",
+];
 
 function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
@@ -158,8 +142,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printBanner(): void {
-  console.log(BANNER.join("\n"));
-  console.log("          " + pc.gray("v" + VERSION) + pc.gray("  \xB7  ") + pc.gray("github.com/aura-core"));
+  for (const line of BANNER_LINES) {
+    console.log(line);
+  }
 }
 
 function printHelp(): void {

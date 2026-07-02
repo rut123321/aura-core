@@ -485,6 +485,7 @@ export class Agent {
     try {
       await this.reactLoop();
     } catch (error) {
+      clearToolSpinner();
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`\n   ${COL.red("\u25A3")} ${COL.red("Error:")} ${COL.red(msg)}`);
       return {
@@ -495,6 +496,7 @@ export class Agent {
       };
     }
 
+    clearToolSpinner();
     const duration = Date.now() - startTime;
     const c = providerColor(this.config.provider);
     printFooter(c, this.config.model, duration);
