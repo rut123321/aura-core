@@ -1,4 +1,5 @@
 import pc from "picocolors";
+import Table from "cli-table3";
 
 export interface TokenPlan {
   id: "plus" | "max" | "ultra";
@@ -51,26 +52,40 @@ const SUITE_URL = "https://platform.minimax.io";
 const DOCS_URL = "https://platform.minimax.io/docs/token-plan/quickstart";
 
 export function printTokenPlans(): void {
+  const t = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [12, 18, 22, 36],
+  });
+  t.push([pc.bold("Plan"), pc.bold("Price"), pc.bold("Tokens"), pc.bold("Best for")]);
+  for (const plan of MINIMAX_TOKEN_PLANS) {
+    const c = plan.id === "plus" ? pc.cyan : plan.id === "max" ? pc.magenta : pc.red;
+    t.push([c(plan.name), pc.bold("$" + plan.pricePerMonth + "/month"), pc.dim(plan.estimatedTokens), pc.dim(plan.bestFor)]);
+  }
   console.log();
   console.log(`  ${pc.bold("MiniMax Token Plans")}`);
-  console.log();
+  console.log(t.toString());
 
-  for (const plan of MINIMAX_TOKEN_PLANS) {
-    const color = plan.id === "plus" ? pc.cyan : plan.id === "max" ? pc.magenta : pc.red;
-    console.log(`  ${color(plan.name.padEnd(8))} ${pc.bold("$" + plan.pricePerMonth + "/month")}`);
-    console.log(`           ${pc.gray(plan.estimatedTokens)}`);
-    console.log(`           ${pc.gray(plan.agents)} \xB7 ${pc.gray(plan.bestFor)}`);
-    console.log();
-  }
-
-  console.log(`  ${pc.bold("Credit Packages")} ${pc.gray("(1,000 credits = $1)")}`);
-  console.log();
+  const ct = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [14, 20],
+  });
+  ct.push([pc.bold("Price"), pc.bold("Credits")]);
   for (const pkg of MINIMAX_CREDIT_PACKAGES) {
-    console.log(`  ${pc.white("$" + pkg.price).padEnd(8)} ${pc.gray(pkg.credits.toLocaleString() + " credits")}`);
+    ct.push(["$" + pkg.price, pkg.credits.toLocaleString() + " credits"]);
   }
-  console.log();
-  console.log(`  ${pc.gray("\u2192 Subscribe:")} ${pc.cyan(SUITE_URL + "/subscribe/token-plan")}`);
-  console.log(`  ${pc.gray("\u2192 Docs:    ")} ${pc.cyan(DOCS_URL)}`);
+  console.log(`  ${pc.bold("Credit Packages")} ${pc.dim("(1,000 credits = $1)")}`);
+  console.log(ct.toString());
+
+  console.log(`  ${pc.dim("\u2192 Subscribe:")} ${pc.cyan(SUITE_URL + "/subscribe/token-plan")}`);
+  console.log(`  ${pc.dim("\u2192 Docs:    ")} ${pc.cyan(DOCS_URL)}`);
   console.log();
 }
 

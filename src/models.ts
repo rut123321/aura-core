@@ -73,6 +73,12 @@ const ALL_CURATED: Record<Provider, ModelInfo[]> = {
     m("MiniMax-M2.7", "MiniMax M2.7", "Strong coding & agentic, 512K context", 512000, true, true, true, "MiniMax"),
     m("MiniMax-M2.5", "MiniMax M2.5", "Fast & affordable, 256K context", 256000, true, false, false, "MiniMax"),
   ],
+  "openai-compatible": [
+    m("gpt-4o", "GPT-4o (default)", "Default model for OpenAI-compatible APIs", 128000, true, true, false, "openai-compatible"),
+  ],
+  "anthropic-compatible": [
+    m("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet (default)", "Default model for Anthropic-compatible APIs", 200000, true, true, true, "anthropic-compatible"),
+  ],
 };
 
 function m(

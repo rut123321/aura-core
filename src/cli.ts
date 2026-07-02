@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 import * as p from "@clack/prompts";
 import pc from "picocolors";
+import ora from "ora";
+import boxen from "boxen";
+import gradient from "gradient-string";
+import Table from "cli-table3";
 import { Agent } from "./agent";
 import { selectModelInteractive } from "./models";
 import {
@@ -9,7 +13,7 @@ import {
   PROVIDERS,
   REASONING_LABELS,
 } from "./types";
-import type { AgentConfig, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
+import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
 import {
   isGitRepo, getGitDiff, getGitDiffStat, gitCommit, gitUndo,
   gitLog, gitBranch, gitCheckout, gitCreateBranch, gitChangesSummary,
@@ -36,12 +40,34 @@ import { join } from "node:path";
 
 const VERSION = "2.1.0";
 
-const BANNER = [
-  "",
-  "          " + pc.gray("\u2588\u2580\u2588 ") + pc.bold("aura") + pc.gray("-") + pc.bold("core"),
-  "          " + pc.gray("the autonomous ai coding agent"),
-  "",
-];
+const bannerGradient = gradient(["#6366f1", "#a855f7", "#06b6d4", "#22d3ee"]);
+
+function makeBanner(): string[] {
+  const logo = [
+    "  █████╗ ██╗   ██╗██████╗  █████╗  ",
+    "  ██╔══██╗██║   ██║██╔══██╗██╔══██╗ ",
+    "  ███████║██║   ██║██████╔╝███████║ ",
+    "  ██╔══██║██║   ██║██╔══██╗██╔══██║ ",
+    "  ██║  ██║╚██████╔╝██║  ██║██║  ██║ ",
+    "  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ",
+  ];
+  const gradientLogo = logo.map(l => "  " + bannerGradient(l));
+  return [
+    "",
+    gradientLogo[0],
+    gradientLogo[1],
+    gradientLogo[2],
+    gradientLogo[3],
+    gradientLogo[4],
+    gradientLogo[5],
+    "",
+    pc.dim(`  ${pc.bold(pc.white("autonomous ai coding agent"))}  ${pc.bold(pc.magenta("v" + VERSION))}`),
+    pc.dim(`  github.com/rut123321/aura-core`),
+    "",
+  ];
+}
+
+const BANNER = makeBanner();
 
 function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
@@ -54,6 +80,17 @@ function pColor(provider: Provider): (s: string) => string {
 function pBadge(provider: Provider): string {
   const c = PROVIDERS[provider].color;
   return c(PROVIDERS[provider].label);
+}
+
+function infoBox(title: string, text: string, color: string = "cyan"): string {
+  return boxen(text, {
+    padding: { top: 0, bottom: 0, left: 2, right: 2 },
+    margin: { top: 0, bottom: 0, left: 2, right: 0 },
+    borderColor: color as "cyan" | "green" | "yellow" | "red" | "magenta" | "blue" | "white",
+    borderStyle: "round",
+    title,
+    titleAlignment: "left",
+  });
 }
 
 function reasonBadge(effort: ReasoningEffort): string {
@@ -126,72 +163,93 @@ function printBanner(): void {
 }
 
 function printHelp(): void {
+  const g = pc.gray, c = pc.cyan, b = pc.bold;
   const lines = [
     "",
-    pc.bold("  Usage"),
-    `    ${pc.white("aura")} ${pc.gray("[options]")} ${pc.gray("[instruction]")}`,
+    b(g("  ═══════════════════════════════════════════════")),
+    b(g("   USAGE")),
+    g("    aura") + g(" [options]") + g(" [instruction]"),
     "",
-    pc.bold("  Options"),
-    `    ${pc.gray("-p, --provider")}     ${pc.gray("MiniMax | fireworks | anthropic | openai | groq | deepseek | together | openrouter | mistral | cerebras")}`,
-    `    ${pc.gray("-m, --model")}        ${pc.gray("Specify model ID")}`,
-    `    ${pc.gray("-r, --reasoning")}    ${pc.gray("off | low | medium | high | max")}`,
-    `    ${pc.gray("-y, --yes")}          ${pc.gray("Auto-confirm all actions")}`,
-    `    ${pc.gray("-l, --list-models")}  ${pc.gray("List available models and exit")}`,
-    `    ${pc.gray("-h, --help")}         ${pc.gray("Show this help")}`,
-    `    ${pc.gray("-v, --version")}      ${pc.gray("Show version")}`,
+    b(g("  ═══════════════════════════════════════════════")),
+    b(g("   OPTIONS")),
+    g("    -p, --provider") + c("    AI provider") + g("  (") + g(PROVIDER_LIST.map(p => PROVIDERS[p].label).join(" · ")) + g(")"),
+    g("    -m, --model") + c("       Model ID"),
+    g("    -r, --reasoning") + c("   Reasoning:") + g(" off · low · medium · high · max"),
+    g("    -y, --yes") + c("         Auto-confirm all actions"),
+    g("    -l, --list-models") + c("  List available models"),
+    g("    -h, --help") + c("        Show this help"),
+    g("    -v, --version") + c("     Show version"),
     "",
-    pc.bold("  Git"),
-    `    ${pc.magenta("/diff")}     ${pc.gray("Show uncommitted changes")}`,
-    `    ${pc.magenta("/commit")}   ${pc.gray("AI commit message + commit")}`,
-    `    ${pc.magenta("/undo")}     ${pc.gray("Revert last AI change")}`,
-    `    ${pc.magenta("/log")}      ${pc.gray("Recent commits")}`,
-    `    ${pc.magenta("/branch")}   ${pc.gray("List/switch/create branches")}`,
-    `    ${pc.magenta("/changes")}  ${pc.gray("Changed files summary")}`,
+    b(g("  ═══════════════════════════════════════════════")),
+    b(g("   / COMMANDS")),
     "",
-    pc.bold("  Context"),
-    `    ${pc.magenta("/add")}      ${pc.gray("<file>  Add to persistent context")}`,
-    `    ${pc.magenta("/drop")}     ${pc.gray("<file>  Remove from context")}`,
-    `    ${pc.magenta("/context")}  ${pc.gray("List context files")}`,
-    `    ${pc.magenta("/compact")}  ${pc.gray("Compact conversation history")}`,
-    `    ${pc.magenta("/init")}     ${pc.gray("Create AURA.md project context")}`,
-    `    ${pc.gray("@filename")}    ${pc.gray("Inline file reference in prompt")}`,
+    b(c("   Git & PR")),
+    g("    /diff       ") + g("Show uncommitted changes"),
+    g("    /commit     ") + g("AI commit message + commit"),
+    g("    /undo [n]   ") + g("Revert last AI change(s)"),
+    g("    /log        ") + g("Recent commits"),
+    g("    /branch     ") + g("List/switch/create branches"),
+    g("    /changes    ") + g("Changed files summary"),
+    g("    /pr         ") + g("Create GitHub Pull Request"),
     "",
-    pc.bold("  Sessions"),
-    `    ${pc.magenta("/save")}     ${pc.gray("[name]  Save session")}`,
-    `    ${pc.magenta("/load")}     ${pc.gray("[name]  Load session")}`,
-    `    ${pc.magenta("/resume")}   ${pc.gray("Pick a saved session to resume")}`,
-    `    ${pc.magenta("/sessions")} ${pc.gray("List saved sessions")}`,
-    `    ${pc.magenta("/export")}   ${pc.gray("Export to Markdown")}`,
+    b(c("   Code Quality")),
+    g("    /review     ") + g("AI review of changes"),
+    g("    /test       ") + g("Run tests (auto-detected)"),
+    g("    /lint       ") + g("Run linter (auto-detected)"),
+    g("    /explain    ") + g("Explain code in a file"),
+    g("    /refactor   ") + g("AI refactoring suggestions"),
+    g("    /gen-test   ") + g("Generate tests for a file"),
+    g("    /doc        ") + g("Generate documentation"),
+    g("    /watch      ") + g("Auto-run tests on file changes"),
     "",
-    pc.bold("  Quality"),
-    `    ${pc.magenta("/review")}   ${pc.gray("AI review of recent changes")}`,
-    `    ${pc.magenta("/test")}     ${pc.gray("Run tests (auto-detected)")}`,
-    `    ${pc.magenta("/lint")}     ${pc.gray("Run linter (auto-detected)")}`,
-    `    ${pc.magenta("/explain")}  ${pc.gray("<file>  Explain code in file")}`,
-    `    ${pc.magenta("/refactor")} ${pc.gray("AI refactoring suggestions")}`,
-    `    ${pc.magenta("/gen-test")} ${pc.gray("<file>  Generate tests for file")}`,
-    `    ${pc.magenta("/doc")}      ${pc.gray("<file>  Generate documentation")}`,
-    `    ${pc.magenta("/search")}   ${pc.gray("<query>  Web search")}`,
-    `    ${pc.magenta("/pr")}       ${pc.gray("Create GitHub PR")}`,
-    `    ${pc.magenta("/watch")}    ${pc.gray("Auto-run tests on file changes")}`,
-    `    ${pc.magenta("/project")}  ${pc.gray("Show detected project info")}`,
+    b(c("   Context & Memory")),
+    g("    /add  <f>   ") + g("Add file to persistent context"),
+    g("    /drop <f>   ") + g("Remove file from context"),
+    g("    /context    ") + g("List context files"),
+    g("    /compact    ") + g("Compact conversation history"),
+    g("    /init       ") + g("Create AURA.md project context"),
+    g("    /memory     ") + g("Show/edit agent memory"),
     "",
-    pc.bold("  Todo & Memory"),
-    `    ${pc.magenta("/todo")}     ${pc.gray("add <text> | done <id> | rm <id> | list | clear")}`,
-    `    ${pc.magenta("/memory")}   ${pc.gray("Show/edit agent memory (MEMORY.md)")}`,
+    b(c("   Sessions")),
+    g("    /save  [n]  ") + g("Save session"),
+    g("    /load  [n]  ") + g("Load session"),
+    g("    /resume     ") + g("Pick a saved session"),
+    g("    /sessions   ") + g("List saved sessions"),
+    g("    /export     ") + g("Export to Markdown"),
     "",
-    pc.bold("  Config"),
-    `    ${pc.magenta("/provider")}  ${pc.gray("Switch provider + model")}`,
-    `    ${pc.magenta("/model")}     ${pc.gray("Change model")}`,
-    `    ${pc.magenta("/reasoning")} ${pc.gray("Set reasoning effort")}`,
-    `    ${pc.magenta("/plans")}     ${pc.gray("Show MiniMax Token Plans")}`,
-    `    ${pc.magenta("/cost")}      ${pc.gray("Show session cost")}`,
-    `    ${pc.gray("model")}     ${pc.gray("Show current model info")}`,
-    `    ${pc.gray("status")}    ${pc.gray("Show session status")}`,
-    `    ${pc.gray("clear")}     ${pc.gray("Clear conversation")}`,
-    `    ${pc.gray("help")}      ${pc.gray("Show this help")}`,
-    `    ${pc.gray("exit")}      ${pc.gray("Exit")}`,
+    b(c("   Provider & Model")),
+    g("    /provider   ") + g("Switch AI provider"),
+    g("    /model      ") + g("Change model"),
+    g("    /reasoning  ") + g("Set reasoning effort"),
+    g("    /cost       ") + g("Show session cost"),
     "",
+    b(c("   Todo")),
+    g("    /todo add  ") + g("<text>  Add todo item"),
+    g("    /todo done ") + g("<id>    Mark complete"),
+    g("    /todo rm   ") + g("<id>    Remove todo"),
+    g("    /todo list ") + g("List todos"),
+    g("    /todo clear") + g("Clear all todos"),
+    "",
+    b(c("   Other")),
+    g("    /search    ") + g("Web search"),
+    g("    /project   ") + g("Show detected project info"),
+    g("    /plans     ") + g("Show Token Plans"),
+    g("    /token-plans") + g("Show Token Plans"),
+    "",
+    b(g("  ═══════════════════════════════════════════════")),
+    b(c("   BUILT-IN SHORTCUTS")),
+    g("    @filename   ") + g("Inline file reference"),
+    g("    @general    ") + g("Spawn subagent for task"),
+    g("    !<command>  ") + g("Run shell command directly"),
+    g("    model       ") + g("Show model info"),
+    g("    status      ") + g("Show session status"),
+    g("    clear       ") + g("Clear conversation"),
+    g("    help        ") + g("Show this help"),
+    g("    exit        ") + g("Exit session"),
+    "",
+    g("  ") + g("Type") + c(" /") + g(" at the prompt to open the command picker."),
+    "",
+
   ];
   console.log(lines.join("\n"));
 }
@@ -215,12 +273,16 @@ function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEf
 }
 
 const PLACEHOLDERS = [
-  "Ask anything... \"Fix a TODO in the codebase\"",
-  "Ask anything... \"What is the tech stack of this project?\"",
-  "Ask anything... \"Fix broken tests\"",
-  "Ask anything... \"Add input validation to auth.ts\"",
-  "Ask anything... \"Explain the architecture\"",
-  "Ask anything... \"Refactor utils for readability\"",
+  "Fix a TODO in the codebase",
+  "What is the tech stack?",
+  "Fix broken tests",
+  "Add input validation to auth.ts",
+  "Explain the architecture",
+  "Refactor utils for readability",
+  "Implement a new feature",
+  "Review last 10 commits",
+  "Generate API docs",
+  "Optimize slow queries",
 ];
 
 let placeholderIdx = Math.floor(Math.random() * PLACEHOLDERS.length);
@@ -262,7 +324,8 @@ function printPreviousConversation(conv: unknown[]): void {
 }
 
 function printReplHeader(): void {
-  console.log(pc.gray("  type your task, or use /diff /commit /add /save /review /test /cost /help /exit"));
+  const g = pc.gray, c = pc.cyan;
+  console.log(g("  ") + c("\u25C9 ") + g("ready") + g(" \u00B7 ") + g("type your task or") + c(" /") + g(" for commands"));
   console.log();
 }
 
@@ -273,25 +336,34 @@ function printStatusBar(state: ReplState): void {
   const pct = ctxLen && ctxLen > 0 ? Math.min(100, (totalTokens / ctxLen) * 100) : 0;
   const cost = state.agent.getCost();
   const shortModel = state.modelInfo.label;
+  const c = pColor(state.modelInfo.provider);
 
-  const parts: string[] = [
-    pc.gray(shortModel),
-    pc.gray(PROVIDERS[state.config.provider].label),
-  ];
+  const modelTag = c(pc.bold(shortModel));
+  const providerTag = pc.gray(PROVIDERS[state.config.provider].label);
+
+  const parts: string[] = [modelTag, providerTag];
 
   if (state.config.reasoningEffort !== "off") {
-    parts.push(pc.gray("reasoning:") + reasonBadge(state.config.reasoningEffort));
+    parts.push(reasonBadge(state.config.reasoningEffort));
   }
 
   if (ctxLen && ctxLen > 0 && totalTokens > 0) {
-    parts.push(pc.gray(`ctx ${fmtTokens(totalTokens)} (${pct.toFixed(1)}%)`));
+    const barLen = 10;
+    const filled = Math.round((pct / 100) * barLen);
+    const bar = pc.green("\u2588".repeat(filled)) + pc.gray("\u2588".repeat(barLen - filled));
+    parts.push(pc.gray(`ctx ${bar} ${pct.toFixed(0)}%`));
   }
 
   if (cost.total > 0) {
     parts.push(pc.gray(fmtCost(cost.total)));
   }
 
-  console.log(pc.gray("  " + parts.join(" \xB7 ")));
+  const historyLen = state.agent.getHistoryLength();
+  if (historyLen > 0) {
+    parts.push(pc.gray(`${historyLen} msgs`));
+  }
+
+  console.log(pc.gray("  \u2500") + " " + parts.join(pc.gray(" \u00B7 ")));
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
@@ -300,6 +372,35 @@ function createConfirmFn(autoConfirm: boolean): ConfirmFn {
     const r = await p.confirm({ message: `${pc.yellow("⚠")}  ${pc.white(message)}`, initialValue: false });
     if (p.isCancel(r)) return false;
     return r as boolean;
+  };
+}
+
+function createAskUserFn(): AskUserFn {
+  return async (question: string, options?: string[]) => {
+    if (options && options.length > 0) {
+      const opts: Array<{ value: string; label: string }> = options.map(o => ({ value: o, label: o }));
+      opts.push({ value: "__custom__", label: pc.italic("Type custom answer...") });
+      const r = await p.select({
+        message: pc.cyan("?") + "  " + pc.white(question),
+        options: opts,
+      });
+      if (p.isCancel(r)) return "";
+      if (r === "__custom__") {
+        const custom = await p.text({
+          message: pc.cyan("?") + "  " + pc.white(question),
+          placeholder: "Type your answer...",
+        });
+        if (p.isCancel(custom)) return "";
+        return (custom as string).trim();
+      }
+      return r as string;
+    }
+    const answer = await p.text({
+      message: pc.cyan("?") + "  " + pc.white(question),
+      placeholder: "Type your answer...",
+    });
+    if (p.isCancel(answer)) return "";
+    return (answer as string).trim();
   };
 }
 
@@ -356,15 +457,20 @@ async function selectReasoning(provider: Provider): Promise<ReasoningEffort | nu
 function buildConfig(
   provider: Provider, apiKey: string, modelId: string,
   autoConfirm: boolean, workdir: string, reasoning: ReasoningEffort,
-  contextLength: number | null,
+  contextLength: number | null, baseURLOverride?: string,
 ): AgentConfig {
   return {
     provider, providerType: PROVIDERS[provider].type, apiKey,
-    baseURL: PROVIDERS[provider].baseURL, model: modelId,
+    baseURL: baseURLOverride ?? PROVIDERS[provider].baseURL,
+    model: modelId,
     maxTokens: DEFAULT_CONFIG.maxTokens as number,
     maxSelfHealingAttempts: DEFAULT_CONFIG.maxSelfHealingAttempts as number,
     autoConfirm, workingDirectory: workdir, reasoningEffort: reasoning, contextLength,
   };
+}
+
+function isCustomProvider(provider: Provider): boolean {
+  return provider === "openai-compatible" || provider === "anthropic-compatible";
 }
 
 interface ReplState {
@@ -372,6 +478,7 @@ interface ReplState {
   modelInfo: ModelInfo;
   config: AgentConfig;
   confirmFn: ConfirmFn;
+  askUserFn: AskUserFn;
 }
 
 async function handleProviderSwitch(state: ReplState, workdir: string): Promise<void> {
@@ -380,16 +487,38 @@ async function handleProviderSwitch(state: ReplState, workdir: string): Promise<
   if (!newProvider) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
   const apiKey = await getApiKeyForProvider(newProvider);
   if (!apiKey) { console.log(`\n  ${pc.red("✗")} ${pc.red("No API key")}\n`); return; }
-  const modelInfo = await selectModelInteractive(newProvider, apiKey);
-  if (!modelInfo) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+
+  let modelInfo: ModelInfo | null;
+  let customBaseURL: string | undefined;
+
+  if (isCustomProvider(newProvider)) {
+    const baseURLInput = await p.text({
+      message: `${pBadge(newProvider)} Enter API base URL`,
+      placeholder: "https://api.example.com/v1",
+      validate: (v) => { if (!v.trim()) return "Required"; if (!v.trim().startsWith("http")) return "Must start with http:// or https://"; return undefined; },
+    });
+    if (p.isCancel(baseURLInput)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+    customBaseURL = (baseURLInput as string).trim().replace(/\/$/, "");
+    const modelName = await p.text({
+      message: `${pBadge(newProvider)} Enter model name`,
+      placeholder: "gpt-4o",
+      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+    });
+    if (p.isCancel(modelName)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+    modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[newProvider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[newProvider].supportsReasoning, provider: newProvider };
+  } else {
+    modelInfo = await selectModelInteractive(newProvider, apiKey);
+    if (!modelInfo) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+  }
+
   let reasoning: ReasoningEffort = "off";
   if (PROVIDERS[newProvider].supportsReasoning) {
     const r = await selectReasoning(newProvider);
     if (r) reasoning = r;
   }
   const prevHistory = state.agent.getConversation();
-  const config = buildConfig(newProvider, apiKey, modelInfo.id, state.config.autoConfirm, workdir, reasoning, modelInfo.contextLength);
-  const newAgent = new Agent(config, state.confirmFn);
+  const config = buildConfig(newProvider, apiKey, modelInfo.id, state.config.autoConfirm, workdir, reasoning, modelInfo.contextLength, customBaseURL);
+  const newAgent = new Agent(config, state.confirmFn, state.askUserFn);
   newAgent.setConversation(prevHistory);
   state.agent = newAgent; state.modelInfo = modelInfo; state.config = config;
   clearScreen(); printBanner(); printSessionInfo(workdir, modelInfo, reasoning); printReplHeader();
@@ -397,11 +526,25 @@ async function handleProviderSwitch(state: ReplState, workdir: string): Promise<
 
 async function handleModelSwitch(state: ReplState, workdir: string): Promise<void> {
   autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
-  const modelInfo = await selectModelInteractive(state.config.provider, state.config.apiKey);
-  if (!modelInfo) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+
+  let modelInfo: ModelInfo | null;
+
+  if (isCustomProvider(state.config.provider)) {
+    const modelName = await p.text({
+      message: `${pBadge(state.config.provider)} Enter model name`,
+      placeholder: "gpt-4o",
+      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+    });
+    if (p.isCancel(modelName)) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+    modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[state.config.provider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[state.config.provider].supportsReasoning, provider: state.config.provider };
+  } else {
+    modelInfo = await selectModelInteractive(state.config.provider, state.config.apiKey);
+    if (!modelInfo) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
+  }
+
   const prevHistory = state.agent.getConversation();
   const config = buildConfig(state.config.provider, state.config.apiKey, modelInfo.id, state.config.autoConfirm, workdir, state.config.reasoningEffort, modelInfo.contextLength);
-  const newAgent = new Agent(config, state.confirmFn);
+  const newAgent = new Agent(config, state.confirmFn, state.askUserFn);
   newAgent.setConversation(prevHistory);
   state.agent = newAgent; state.modelInfo = modelInfo; state.config = config;
   clearScreen(); printBanner(); printSessionInfo(workdir, modelInfo, state.config.reasoningEffort); printReplHeader();
@@ -415,7 +558,7 @@ async function handleReasoningSwitch(state: ReplState): Promise<void> {
   const effort = await selectReasoning(state.config.provider);
   if (!effort) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
   state.config.reasoningEffort = effort;
-  const newAgent = new Agent(state.config, state.confirmFn);
+  const newAgent = new Agent(state.config, state.confirmFn, state.askUserFn);
   newAgent.setConversation(state.agent.getConversation());
   state.agent = newAgent;
   console.log(`\n  ${pc.green("✓")} ${pc.green("Reasoning")} ${reasonBadge(effort)}\n`);
@@ -426,15 +569,25 @@ function printModelInfo(state: ReplState): void {
   const c = pColor(model.provider);
   const usage = state.agent.getTokenUsage();
   const ctxLen = state.config.contextLength;
+  const t = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [16, 50],
+  });
+  t.push([pc.bold("Property"), pc.bold("Value")]);
+  t.push(["Model", c(model.label)]);
+  t.push(["ID", pc.dim(model.id)]);
+  if (ctxLen) t.push(["Context", fmtTokens(ctxLen) + " tokens"]);
+  t.push(["Tools", model.supportsTools ? pc.green("✓") : pc.red("✗")]);
+  t.push(["Vision", model.supportsVision ? pc.green("✓") : pc.red("✗")]);
+  t.push(["Reasoning", model.supportsReasoning ? pc.green("✓") : pc.red("✗") + " (" + reasonBadge(state.config.reasoningEffort) + ")"]);
+  if (usage.total > 0) t.push(["Tokens used", fmtTokens(usage.total)]);
   console.log();
-  console.log(`  ${pc.gray("\u2503")} ${pc.bold(c(model.label))}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("id")}        ${pc.gray(model.id)}`);
-  if (ctxLen) console.log(`  ${pc.gray("\u2503")} ${pc.gray("context")}   ${pc.gray(fmtTokens(ctxLen) + " tokens")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("tools")}     ${model.supportsTools ? pc.green("\u2022") : pc.red("\u2022")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("vision")}    ${model.supportsVision ? pc.green("\u2022") : pc.red("\u2022")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("reasoning")} ${model.supportsReasoning ? pc.green("\u2022") : pc.red("\u2022")} ${pc.gray("current:")} ${reasonBadge(state.config.reasoningEffort)}`);
-  if (usage.total > 0) console.log(`  ${pc.gray("\u2503")} ${pc.gray("tokens")}    ${pc.gray(fmtTokens(usage.total))}`);
-  console.log();
+  console.log(`  ${pc.bold("Model Info")}`);
+  console.log(t.toString());
 }
 
 function printStatus(state: ReplState): void {
@@ -442,36 +595,53 @@ function printStatus(state: ReplState): void {
   const cost = state.agent.getCost();
   const ctxFiles = getContextFiles();
   const modifiedFiles = state.agent.getModifiedFiles();
+  const t = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [16, 60],
+  });
+  t.push([pc.bold("Property"), pc.bold("Value")]);
+  t.push(["Model", pColor(state.modelInfo.provider)(state.modelInfo.label)]);
+  t.push(["Provider", pc.dim(PROVIDERS[state.config.provider].label)]);
+  t.push(["Reasoning", reasonBadge(state.config.reasoningEffort)]);
+  t.push(["History", String(state.agent.getHistoryLength()) + " messages"]);
+  t.push(["Tokens", fmtTokens(usage.total)]);
+  if (cost.total > 0) t.push(["Cost", fmtCost(cost.total)]);
+  if (ctxFiles.length > 0) t.push(["Context files", ctxFiles.map(f => f.path).join(", ")]);
+  if (modifiedFiles.length > 0) t.push(["Modified", String(modifiedFiles.length) + " files"]);
+  t.push(["Directory", pc.dim(process.cwd())]);
   console.log();
-  console.log(`  ${pc.gray("\u2503")} ${pc.bold("Session")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("model")}     ${pColor(state.modelInfo.provider)(state.modelInfo.label)}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("provider")}  ${pc.gray(PROVIDERS[state.config.provider].label)}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("reasoning")} ${reasonBadge(state.config.reasoningEffort)}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("history")}   ${pc.gray(String(state.agent.getHistoryLength()) + " messages")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("tokens")}    ${pc.gray(fmtTokens(usage.total))}`);
-  if (cost.total > 0) console.log(`  ${pc.gray("\u2503")} ${pc.gray("cost")}      ${pc.gray(fmtCost(cost.total))}`);
-  if (ctxFiles.length > 0) console.log(`  ${pc.gray("\u2503")} ${pc.gray("ctx files")} ${pc.gray(ctxFiles.map(f => f.path).join(", "))}`);
-  if (modifiedFiles.length > 0) console.log(`  ${pc.gray("\u2503")} ${pc.gray("modified")}  ${pc.gray(String(modifiedFiles.length) + " files")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray(process.cwd())}`);
-  console.log();
+  console.log(`  ${pc.bold("Session Status")}`);
+  console.log(t.toString());
 }
 
 function printCost(state: ReplState): void {
   const cost = state.agent.getCost();
   const usage = state.agent.getTokenUsage();
-  console.log();
-  console.log(`  ${pc.gray("\u2503")} ${pc.bold("Cost")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("input")}    ${pc.gray(fmtTokens(usage.input) + " tokens")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("output")}   ${pc.gray(fmtTokens(usage.output) + " tokens")}`);
-  console.log(`  ${pc.gray("\u2503")} ${pc.gray("total")}    ${pc.gray(fmtTokens(usage.total) + " tokens")}`);
+  const t = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [14, 16],
+  });
+  t.push([pc.bold("Tokens"), pc.bold("Count")]);
+  t.push(["Input", fmtTokens(usage.input)]);
+  t.push(["Output", fmtTokens(usage.output)]);
+  t.push([pc.bold("Total"), pc.bold(fmtTokens(usage.total))]);
   if (cost.total > 0) {
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("input $")}   ${pc.gray(fmtCost(cost.input))}`);
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("output $")}  ${pc.gray(fmtCost(cost.output))}`);
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("total $")}   ${pc.green(fmtCost(cost.total))}`);
-  } else {
-    console.log(`  ${pc.gray("\u2503")} ${pc.gray("no pricing data for this model")}`);
+    t.push([pc.bold("Cost"), pc.bold("")]);
+    t.push(["Input $", fmtCost(cost.input)]);
+    t.push(["Output $", fmtCost(cost.output)]);
+    t.push([pc.green("Total $"), pc.green(fmtCost(cost.total))]);
   }
   console.log();
+  console.log(`  ${pc.bold("Cost Breakdown")}`);
+  console.log(t.toString());
 }
 
 async function handleDiff(state: ReplState): Promise<void> {
@@ -759,7 +929,7 @@ async function handleCompact(state: ReplState): Promise<void> {
     console.log(`\n  ${pc.gray("Not enough history to compact.")}\n`);
     return;
   }
-  console.log(`\n  ${pc.gray("◆")} ${pc.gray("Compacting conversation...")}`);
+  console.log(`\n${infoBox("compact", "Compacting conversation... This may take a moment.", "yellow")}\n`);
   await state.agent.run("Summarize our conversation so far in 5-10 bullet points. Include key decisions, files changed, and remaining tasks. This is for context compaction — be extremely concise.");
   const conv = state.agent.getConversation();
   const lastAssistant = [...conv].reverse().find(m => m.role === "assistant");
@@ -838,15 +1008,26 @@ async function handleLoad(state: ReplState, args: string): Promise<void> {
 function handleSessionsList(): void {
   const sessions = listSessions();
   console.log();
-  console.log(`  ${pc.gray("◆")} ${pc.bold("Sessions")}`);
-  
+  console.log(`  ${pc.bold("Saved Sessions")}`);
+
   if (sessions.length === 0) {
-    console.log(`  ${pc.gray("No saved sessions. Use /save [name]")}`);
+    console.log(`  ${pc.dim("No saved sessions. Use /save [name]")}`);
   } else {
+    const t = new Table({
+      style: { head: ["cyan"], border: ["gray"] },
+      chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+               "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+               "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+               "right": "│", "right-mid": "┤" },
+      colWidths: [22, 14, 28, 20],
+    });
+    t.push([pc.bold("Name"), pc.bold("Provider"), pc.bold("Model"), pc.bold("Date")]);
     for (const s of sessions) {
-      console.log(`  ${pc.white(s.name.padEnd(20))} ${pc.gray(s.provider.padEnd(12))} ${pc.gray(s.model.slice(0, 25).padEnd(25))} ${pc.gray(fmtDate(s.timestamp))}`);
+      t.push([pc.white(s.name), pc.dim(PROVIDERS[s.provider as Provider]?.label ?? s.provider), pc.dim(s.model.slice(0, 26)), pc.dim(fmtDate(s.timestamp))]);
     }
+    console.log(t.toString());
   }
+  console.log();
   console.log();
 }
 
@@ -1250,6 +1431,181 @@ function parseSlashCommand(input: string): { command: string; args: string } {
   return { command: input.slice(0, spaceIdx), args: input.slice(spaceIdx + 1).trim() };
 }
 
+interface PickerOption {
+  label: string;
+  hint?: string;
+  value: string;
+}
+
+const COMMAND_CATEGORIES: Array<{ label: string; options: PickerOption[] }> = [
+  {
+    label: "Git & PR",
+    options: [
+      { label: "/diff", hint: "Show uncommitted changes", value: "/diff" },
+      { label: "/commit", hint: "AI commit message + commit", value: "/commit" },
+      { label: "/undo", hint: "Revert last AI change(s)", value: "/undo" },
+      { label: "/log", hint: "Recent commits", value: "/log" },
+      { label: "/branch", hint: "Branch operations", value: "/branch" },
+      { label: "/changes", hint: "Changed files summary", value: "/changes" },
+      { label: "/pr", hint: "Create GitHub PR", value: "/pr" },
+    ],
+  },
+  {
+    label: "Code Quality",
+    options: [
+      { label: "/review", hint: "AI review of changes", value: "/review" },
+      { label: "/test", hint: "Run tests", value: "/test" },
+      { label: "/lint", hint: "Run linter", value: "/lint" },
+      { label: "/explain", hint: "Explain code", value: "/explain" },
+      { label: "/refactor", hint: "Refactoring suggestions", value: "/refactor" },
+      { label: "/gen-test", hint: "Generate tests", value: "/gen-test" },
+      { label: "/doc", hint: "Generate documentation", value: "/doc" },
+      { label: "/watch", hint: "Watch & auto-test", value: "/watch" },
+    ],
+  },
+  {
+    label: "Context & Memory",
+    options: [
+      { label: "/add", hint: "Add file to context", value: "/add" },
+      { label: "/drop", hint: "Remove file from context", value: "/drop" },
+      { label: "/context", hint: "List context files", value: "/context" },
+      { label: "/compact", hint: "Compact history", value: "/compact" },
+      { label: "/init", hint: "Create project context", value: "/init" },
+      { label: "/memory", hint: "Show/edit memory", value: "/memory" },
+    ],
+  },
+  {
+    label: "Sessions",
+    options: [
+      { label: "/save", hint: "Save session", value: "/save" },
+      { label: "/load", hint: "Load session", value: "/load" },
+      { label: "/resume", hint: "Pick saved session", value: "/resume" },
+      { label: "/sessions", hint: "List sessions", value: "/sessions" },
+      { label: "/export", hint: "Export to Markdown", value: "/export" },
+    ],
+  },
+  {
+    label: "Provider & Model",
+    options: [
+      { label: "/provider", hint: "Switch provider", value: "/provider" },
+      { label: "/model", hint: "Change model", value: "/model" },
+      { label: "/reasoning", hint: "Set reasoning effort", value: "/reasoning" },
+      { label: "/cost", hint: "Show cost", value: "/cost" },
+    ],
+  },
+  {
+    label: "Todo",
+    options: [
+      { label: "/todo add", hint: "Add todo", value: "/todo add" },
+      { label: "/todo done", hint: "Complete todo", value: "/todo done" },
+      { label: "/todo rm", hint: "Remove todo", value: "/todo rm" },
+      { label: "/todo list", hint: "List todos", value: "/todo list" },
+      { label: "/todo clear", hint: "Clear todos", value: "/todo clear" },
+    ],
+  },
+  {
+    label: "Other",
+    options: [
+      { label: "/search", hint: "Web search", value: "/search" },
+      { label: "/project", hint: "Show project info", value: "/project" },
+      { label: "/plans", hint: "Show Token Plans", value: "/plans" },
+      { label: "/token-plans", hint: "Show Token Plans", value: "/token-plans" },
+    ],
+  },
+];
+
+async function showCommandPicker(): Promise<string | null> {
+  const g = pc.gray, c = pc.cyan, w = pc.white;
+
+  const topOption: PickerOption = { label: c("Type custom command\u2026"), value: "__custom__", hint: "Manually type a command" };
+
+  let selected = await p.select({
+    message: w("Pick a command"),
+    options: [
+      topOption,
+      ...COMMAND_CATEGORIES.flatMap(cat => [
+        { label: g(cat.label), value: `__header__`, hint: "" } as { label: string; value: string; hint: string },
+        ...cat.options.map(o => ({ label: c(o.label), hint: g(o.hint!), value: o.value })),
+      ]),
+    ],
+  });
+
+  if (p.isCancel(selected)) return null;
+  if (selected === "__custom__") return "/";
+
+  const cmd = selected as string;
+
+  const needsArg: Record<string, string> = {
+    "/add": "Enter file path to add to context:",
+    "/drop": "Enter file path to remove from context:",
+    "/explain": "Enter file path to explain:",
+    "/refactor": "Enter file path to refactor:",
+    "/gen-test": "Enter file path to generate tests for:",
+    "/doc": "Enter file path to document:",
+    "/undo": "Enter number of changes to undo (default 1):",
+    "/save": "Enter session name (optional):",
+    "/load": "Enter session name:",
+    "/search": "Enter search query:",
+    "/todo add": "Enter todo text:",
+    "/todo done": "Enter todo ID:",
+    "/todo rm": "Enter todo ID:",
+  };
+
+  if (cmd in needsArg) {
+    const arg = await p.text({ message: c(needsArg[cmd]), placeholder: g("optional, press Enter to skip") });
+    if (p.isCancel(arg)) return null;
+    return arg ? `${cmd} ${arg}` : cmd;
+  }
+
+  return cmd;
+}
+
+async function dispatchSlash(state: ReplState, command: string, args: string): Promise<boolean> {
+  const workdir = state.config.workingDirectory;
+  switch (command) {
+    case "/provider": case "/p": await handleProviderSwitch(state, workdir); return true;
+    case "/model": case "/m": await handleModelSwitch(state, workdir); return true;
+    case "/reasoning": case "/r": handleReasoningSwitch(state); return true;
+    case "/cost": printCost(state); return true;
+    case "/diff": await handleDiff(state); return true;
+    case "/commit": await handleCommit(state); return true;
+    case "/undo": handleUndo(state, args); return true;
+    case "/log": await handleLog(state); return true;
+    case "/branch": await handleBranch(state); return true;
+    case "/changes": await handleChanges(state); return true;
+    case "/add": handleAddContext(state, args); return true;
+    case "/drop": handleDropContext(args); return true;
+    case "/context": handleContextList(); return true;
+    case "/compact": await handleCompact(state); return true;
+    case "/init": handleInit(state); return true;
+    case "/save": await handleSave(state, args); return true;
+    case "/load": await handleLoad(state, args); return true;
+    case "/resume": await handleResume(state); return true;
+    case "/sessions": handleSessionsList(); return true;
+    case "/export": await handleExport(state); return true;
+    case "/review": await handleReview(state); return true;
+    case "/test": await handleTest(state); return true;
+    case "/lint": await handleLint(state); return true;
+    case "/explain": await handleExplain(state, args); return true;
+    case "/refactor": await handleRefactor(state); return true;
+    case "/search": handleWebSearchCmd(state, args); return true;
+    case "/pr": await handlePr(state); return true;
+    case "/watch": await handleWatch(state); return true;
+    case "/project": handleProjectInfo(state); return true;
+    case "/token-plans":
+    case "/plans":
+      handleTokenPlans();
+      return true;
+    case "/todo": handleTodo(state, args); return true;
+    case "/memory": handleMemory(state, args); return true;
+    case "/gen-test": await handleGenTest(state, args); return true;
+    case "/doc": await handleDoc(state, args); return true;
+    default:
+      console.log(`\n  ${pc.red("\u2717")} ${pc.red(`Unknown: ${command}`)} ${pc.gray("type 'help'")}\n`);
+      return true;
+  }
+}
+
 async function runRepl(state: ReplState): Promise<void> {
   printReplHeader();
   const workdir = process.cwd();
@@ -1280,7 +1636,7 @@ async function runRepl(state: ReplState): Promise<void> {
       process.exit(0);
     }
 
-    const raw = (input as string).trim();
+    let raw = (input as string).trim();
     if (!raw) continue;
 
     if (raw === "exit" || raw === "quit" || raw === ":q") {
@@ -1313,49 +1669,31 @@ async function runRepl(state: ReplState): Promise<void> {
     }
 
     if (raw.startsWith("/")) {
-      const { command, args } = parseSlashCommand(raw);
-
-      switch (command) {
-        case "/provider": case "/p": await handleProviderSwitch(state, workdir); continue;
-        case "/model": case "/m": await handleModelSwitch(state, workdir); continue;
-        case "/reasoning": case "/r": await handleReasoningSwitch(state); continue;
-        case "/cost": printCost(state); continue;
-        case "/diff": await handleDiff(state); continue;
-        case "/commit": await handleCommit(state); continue;
-        case "/undo": await handleUndo(state, args); continue;
-        case "/log": await handleLog(state); continue;
-        case "/branch": await handleBranch(state); continue;
-        case "/changes": await handleChanges(state); continue;
-        case "/add": handleAddContext(state, args); continue;
-        case "/drop": handleDropContext(args); continue;
-        case "/context": handleContextList(); continue;
-        case "/compact": await handleCompact(state); continue;
-        case "/init": handleInit(state); continue;
-        case "/save": await handleSave(state, args); continue;
-        case "/load": await handleLoad(state, args); continue;
-        case "/resume": await handleResume(state); continue;
-        case "/sessions": handleSessionsList(); continue;
-        case "/export": await handleExport(state); continue;
-        case "/review": await handleReview(state); continue;
-        case "/test": await handleTest(state); continue;
-        case "/lint": await handleLint(state); continue;
-        case "/explain": await handleExplain(state, args); continue;
-        case "/refactor": await handleRefactor(state); continue;
-        case "/search": await handleWebSearchCmd(state, args); continue;
-        case "/pr": await handlePr(state); continue;
-        case "/watch": await handleWatch(state); continue;
-        case "/project": handleProjectInfo(state); continue;
-        case "/token-plans":
-        case "/plans":
-          handleTokenPlans();
+      if (raw === "/") {
+        const picked = await showCommandPicker();
+        if (!picked) continue;
+        if (picked === "/") {
+          const manual = await p.text({ message: pColor(state.modelInfo.provider)(pc.bold(">")), initialValue: "/" });
+          if (p.isCancel(manual) || !(manual as string).trim()) continue;
+          const mr = (manual as string).trim();
+          if (mr.startsWith("/")) {
+            const { command: mc, args: ma } = parseSlashCommand(mr);
+            const handled = await dispatchSlash(state, mc, ma);
+            if (handled) continue;
+            raw = mr;
+          } else {
+            raw = mr;
+          }
+        } else {
+          const { command: pc2, args: pa } = parseSlashCommand(picked);
+          const handled = await dispatchSlash(state, pc2, pa);
+          if (handled) continue;
           continue;
-        case "/todo": handleTodo(state, args); continue;
-        case "/memory": handleMemory(state, args); continue;
-        case "/gen-test": await handleGenTest(state, args); continue;
-        case "/doc": await handleDoc(state, args); continue;
-        default:
-          console.log(`\n  ${pc.red("\u2717")} ${pc.red(`Unknown: ${command}`)} ${pc.gray("type 'help'")}\n`);
-          continue;
+        }
+      } else {
+        const { command, args } = parseSlashCommand(raw);
+        const handled = await dispatchSlash(state, command, args);
+        if (handled) continue;
       }
     }
 
@@ -1371,9 +1709,11 @@ async function runRepl(state: ReplState): Promise<void> {
     if (raw.includes("@general")) {
       const taskMatch = raw.match(/@general\s+(.+)/s);
       const task = taskMatch ? taskMatch[1].trim() : processedPrompt;
-      console.log(`\n  ${pc.gray("Spawning subagent...")}\n`);
+      const spinner = ora({ text: "Spawning subagent...", spinner: "dots" }).start();
       const result = await runSubagent(state.config, task, workdir);
-      console.log(`  ${pc.gray("subagent done")} ${pc.gray(`(${result.iterations} iters, ${result.tokensUsed} tokens)`)}`);
+      spinner.stop();
+      console.log();
+      console.log(`  ${pc.green("\u25A3")} ${pc.gray("subagent done")} ${pc.gray(`(${result.iterations} iters, ${result.tokensUsed} tokens)`)}`);
       console.log(`\n${result.output}\n`);
       continue;
     }
@@ -1433,14 +1773,17 @@ async function main(): Promise<void> {
   if (parsed.listModels) {
     const { getCuratedModels, fetchFireworksModels } = await import("./models");
     if (provider === "fireworks") {
-      console.log(`\n  ${pc.cyan("◆")} ${pc.gray("Fetching from Fireworks API...")}\n`);
+      const spinner = ora({ text: "Fetching models from Fireworks API...", spinner: "dots" }).start();
       try {
         const live = await fetchFireworksModels(apiKey);
+        spinner.stop();
         if (live.length === 0) {
-          console.log(`  ${pc.yellow("⚠")}  ${pc.gray("Using curated list")}\n`);
+          console.log(`  ${pc.yellow("\u26A0")}  ${pc.dim("No live models, using curated list")}`);
+          console.log();
           printModelTable(getCuratedModels("fireworks"));
         } else {
-          console.log(`  ${pc.green("✓")} ${pc.gray(`${live.length} models`)}\n`);
+          console.log(`  ${pc.green("\u2713")} ${pc.dim(live.length + " models loaded")}`);
+          console.log();
           printModelTable(live);
         }
       } catch (e) {
@@ -1456,13 +1799,35 @@ async function main(): Promise<void> {
   }
 
   const modelFromSettings = globalSettings.lastModel && globalSettings.lastProvider === provider ? globalSettings.lastModel : null;
-  const modelInfo = parsed.model
-    ? { id: parsed.model, label: parsed.model.split("/").pop() ?? parsed.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
-    : savedConfig?.model
-      ? { id: savedConfig.model, label: savedConfig.model.split("/").pop() ?? savedConfig.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
-      : modelFromSettings
-        ? { id: modelFromSettings, label: modelFromSettings.split("/").pop() ?? modelFromSettings, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider }
-        : await selectModelInteractive(provider, apiKey);
+
+  let customBaseURL: string | undefined;
+  let modelInfo: ModelInfo | null = null;
+
+  if (parsed.model) {
+    modelInfo = { id: parsed.model, label: parsed.model.split("/").pop() ?? parsed.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider };
+  } else if (savedConfig?.model) {
+    modelInfo = { id: savedConfig.model, label: savedConfig.model.split("/").pop() ?? savedConfig.model, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider };
+  } else if (modelFromSettings) {
+    modelInfo = { id: modelFromSettings, label: modelFromSettings.split("/").pop() ?? modelFromSettings, description: "", contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider };
+  } else if (isCustomProvider(provider)) {
+    const baseURLInput = await p.text({
+      message: `${pBadge(provider)} Enter API base URL`,
+      placeholder: "https://api.example.com/v1",
+      validate: (v) => { if (!v.trim()) return "Required"; if (!v.trim().startsWith("http")) return "Must start with http:// or https://"; return undefined; },
+    });
+    if (p.isCancel(baseURLInput)) process.exit(1);
+    customBaseURL = (baseURLInput as string).trim().replace(/\/$/, "");
+
+    const modelName = await p.text({
+      message: `${pBadge(provider)} Enter model name`,
+      placeholder: "gpt-4o",
+      validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
+    });
+    if (p.isCancel(modelName)) process.exit(1);
+    modelInfo = { id: (modelName as string).trim(), label: (modelName as string).trim(), description: `Custom model for ${PROVIDERS[provider].label}`, contextLength: null, supportsTools: true, supportsVision: false, supportsReasoning: PROVIDERS[provider].supportsReasoning, provider };
+  } else {
+    modelInfo = await selectModelInteractive(provider, apiKey);
+  }
 
   if (!modelInfo) { console.log(`\n  ${pc.red("\u2717")} ${pc.red("No model")}\n`); process.exit(1); }
 
@@ -1484,9 +1849,10 @@ async function main(): Promise<void> {
   printBanner();
   printSessionInfo(workdir, modelInfo, reasoning);
 
-  const config = buildConfig(provider, apiKey, modelInfo.id, autoConfirm, workdir, reasoning, modelInfo.contextLength);
+  const config = buildConfig(provider, apiKey, modelInfo.id, autoConfirm, workdir, reasoning, modelInfo.contextLength, customBaseURL);
   const confirmFn = createConfirmFn(config.autoConfirm);
-  const agent = new Agent(config, confirmFn);
+  const askUserFn = createAskUserFn();
+  const agent = new Agent(config, confirmFn, askUserFn);
 
   const keyFromEnv = getApiKeyFromEnv(provider);
   saveGlobalSettings({
@@ -1525,24 +1891,36 @@ async function main(): Promise<void> {
         }
       }
     }
-    await runRepl({ agent, modelInfo, config, confirmFn });
+    await runRepl({ agent, modelInfo, config, confirmFn, askUserFn });
   }
 }
 
 function printModelTable(models: ModelInfo[]): void {
-  const idW = 46, labelW = 18;
-  console.log(`  ${pc.gray("ID".padEnd(idW))} ${pc.gray("Name".padEnd(labelW))} ${pc.gray("T")} ${pc.gray("V")} ${pc.gray("R")}  ${pc.gray("Context")}`);
-  console.log(`  ${pc.gray("─".repeat(idW))} ${pc.gray("─".repeat(labelW))} ${pc.gray("─")} ${pc.gray("─")} ${pc.gray("─")}  ${pc.gray("───────")}`);
+  const t = new Table({
+    style: { head: ["cyan"], border: ["gray"] },
+    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
+             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
+             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
+             "right": "│", "right-mid": "┤" },
+    colWidths: [48, 20, 6, 6, 6, 10],
+  });
+  t.push([pc.bold("ID"), pc.bold("Name"), pc.bold("T"), pc.bold("V"), pc.bold("R"), pc.bold("Context")]);
   for (const m of models) {
     const c = pColor(m.provider);
-    const t = m.supportsTools ? pc.green("✓") : pc.gray("·");
-    const v = m.supportsVision ? pc.green("✓") : pc.gray("·");
-    const r = m.supportsReasoning ? pc.green("✓") : pc.gray("·");
-    const ctx = m.contextLength ? (m.contextLength >= 1_000_000 ? `${pc.white((m.contextLength / 1_000_000).toFixed(0))}${pc.gray("M")}` : `${pc.white(Math.round(m.contextLength / 1000))}${pc.gray("K")}`) : pc.gray("—");
-    const idD = m.id.length > idW - 1 ? m.id.slice(0, idW - 3) + pc.gray("…") : m.id;
-    console.log(`  ${pc.gray(idD.padEnd(idW))} ${c(m.label.padEnd(labelW))} ${t} ${v} ${r}  ${ctx}`);
+    const tIcon = m.supportsTools ? pc.green("\u2713") : pc.dim("\u00B7");
+    const vIcon = m.supportsVision ? pc.green("\u2713") : pc.dim("\u00B7");
+    const rIcon = m.supportsReasoning ? pc.green("\u2713") : pc.dim("\u00B7");
+    const ctx = m.contextLength
+      ? (m.contextLength >= 1_000_000
+          ? (m.contextLength / 1_000_000).toFixed(0) + "M"
+          : Math.round(m.contextLength / 1000) + "K")
+      : pc.dim("\u2014");
+    const idD = m.id.length > 46 ? m.id.slice(0, 44) + pc.dim("\u2026") : m.id;
+    t.push([pc.dim(idD), c(m.label), tIcon, vIcon, rIcon, ctx]);
   }
   console.log();
+  console.log(`  ${pc.bold("Available Models")}`);
+  console.log(t.toString());
 }
 
 main().catch((e: unknown) => {

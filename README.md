@@ -15,7 +15,7 @@
 
 **aura-core** is an elite autonomous AI coding agent that operates directly in your terminal. It follows the **ReAct (Reasoning → Action → Observation)** loop to understand, modify, and manage codebases with minimal supervision.
 
-It supports **10 AI providers**, **50+ models**, and comes with **8 native tools** — file read/write/patch, shell execution, glob, search, web search, and file watching.
+It supports **12 AI providers**, **50+ models**, and comes with **9 native tools** — file read/write/patch, shell execution, glob, search, web search, file watching, and user prompts.
 
 Sessions auto-save after every interaction and restore on restart. Your last provider, model, and API key are persisted locally.
 
@@ -36,8 +36,10 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 | **Mistral** | Mistral Large, Mistral Nemo, Codestral | ✓ |
 | **Cerebras** | Llama 3.1 8B, Llama 3.1 70B | ✗ |
 | **OpenRouter** | All OpenRouter models | varies |
+| **OpenAI-Compatible** | Any OpenAI-compatible endpoint | varies |
+| **Anthropic-Compatible** | Any Anthropic-compatible endpoint | varies |
 
-### 8 Native Tools
+### 9 Native Tools
 - `list_files` — Map project structure (respects .gitignore)
 - `view_file` — Read file contents
 - `write_file` — Create new files
@@ -46,6 +48,15 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 - `search_files` — Full-text search
 - `glob` — Pattern-based file matching (`minimatch`-powered)
 - `web_search` — Real-time web queries
+- `ask_user` — Ask you questions with predefined options or free-text input
+
+### Beautiful Terminal UI
+- **Gradient banner** — Multi-color logo on startup
+- **Interactive command picker** — Type `/` to open a categorized command select menu with inline arg prompts
+- **Tables** — Structured data displayed in clean tables (`/cost`, `/model`, `status`, `/sessions`, `/plans`, `--list-models`)
+- **Spinners** — Visual progress indicators for long-running operations
+- **Context progress bar** — Visual █ bar showing context window usage
+- **Command categories** — Help organized by Git, Code Quality, Sessions, etc.
 
 ### Session & Persistence
 - **Auto-save** after every REPL interaction (last 10 kept)
@@ -58,7 +69,7 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 |---|---|
 | `/diff` | Show uncommitted changes |
 | `/commit` | AI-generated commit message + commit |
-| `/undo` | Revert last AI change |
+| `/undo [n]` | Revert last N AI change(s) |
 | `/log` | Recent commits |
 | `/branch` | List/switch/create branches |
 | `/changes` | Changed files summary |
@@ -73,23 +84,24 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 | `/pr` | Create GitHub PR |
 | `/watch` | Auto-run tests on file changes |
 | `/project` | Show detected project info |
-| `/add` | Add file to persistent context |
-| `/drop` | Remove file from context |
+| `/add <file>` | Add file to persistent context |
+| `/drop <file>` | Remove file from context |
 | `/compact` | Compact conversation history |
 | `/init` | Create AURA.md project context |
-| `/save` `[name]` | Save session |
-| `/load` `[name]` | Load session |
+| `/save [name]` | Save session |
+| `/load [name]` | Load session |
 | `/resume` | Pick a saved session to resume (shows history) |
 | `/sessions` | List saved sessions |
 | `/export` | Export to Markdown |
-| `/todo` | Task management |
-| `/memory` | Agent long-term memory |
+| `/todo add/done/rm/list/clear` | Task management |
+| `/memory show/init/clear` | Agent long-term memory |
 | `/provider` | Switch AI provider + model |
 | `/model` | Change model |
 | `/reasoning` | Set reasoning effort |
 | `/plans` | MiniMax Token Plans |
 | `/cost` | Show session cost |
 | `@filename` | Inline file reference |
+| `@general <task>` | Spawn subagent for a task |
 
 ### Self-Healing
 When a shell command or file write fails, aura-core automatically analyzes the error and retries with a corrected approach — up to 5 attempts by default.
@@ -140,6 +152,9 @@ aura
 
 # Specify model and reasoning
 aura -p deepseek -m deepseek-reasoner -r high "Refactor the auth module"
+
+# Open command picker
+# Type / in the REPL to browse commands by category
 ```
 
 ---
@@ -213,15 +228,20 @@ Create a task in `.vscode/tasks.json`:
 
 | Feature | aura-core | Claude Code | Codex CLI | opencode |
 |---|---|---|---|---|
-| Providers | 10+ | 1 (Anthropic) | 1 (Anthropic) | 1 (Anthropic) |
-| Open Source | ✓ MIT | ✗ | ✗ | ✓ Apache 2.0 |
+| Providers | 12+ | 1 (Anthropic) | 1 (Anthropic) | 7+ |
+| Open Source | ✓ MIT | ✗ | ✓ Apache 2.0 | ✓ Apache 2.0 |
 | Self-Healing | ✓ | ✓ | ✗ | ✗ |
-| Session Auto-Save | ✓ | ✗ | ✗ | ✗ |
-| Session Resume | ✓ | ✗ | ✗ | ✗ |
+| Interactive Command Picker | ✓ | ✓ | ✗ | ✗ |
+| Gradient UI / Tables / Spinners | ✓ | ✗ | ✗ | ✗ |
+| Session Auto-Save | ✓ | ✓ | ✗ | ✓ |
+| Session Resume | ✓ | ✓ | ✗ | ✓ |
 | File Watching | ✓ | ✗ | ✗ | ✗ |
-| Web Search | ✓ | ✗ | ✗ | ✗ |
+| Web Search | ✓ | ✓ | ✓ | ✓ |
 | PR Creation | ✓ | ✗ | ✓ | ✗ |
 | API Key Persist | ✓ | ✗ | ✗ | ✗ |
+| Custom Provider Support | ✓ | ✗ | ✗ | ✓ |
+| Sub-Agent Spawning | ✓ | ✓ | ✓ | ✓ |
+| Ask User Prompts | ✓ | ✗ | ✗ | ✗ |
 | Project Detection | 15 types | — | — | — |
 
 ---
@@ -230,10 +250,10 @@ Create a task in `.vscode/tasks.json`:
 
 ```
 src/
-├── cli.ts          # Entry point — REPL & CLI (1500+ lines)
+├── cli.ts          # Entry point — REPL, commands, command picker, tables, spinners
 ├── agent.ts        # ReAct loop — streaming, tool execution, self-healing
-├── tools.ts        # Tool implementations (8 tools) + backup/undo
-├── types.ts        # Type definitions, provider configs, pricing
+├── tools.ts        # Tool implementations (9 tools) + backup/undo
+├── types.ts        # Type definitions, 12 provider configs, pricing
 ├── models.ts       # Model definitions & selection
 ├── config.ts       # Project detection (15 types) & config loading
 ├── context.ts      # File context, AURA.md, MEMORY.md
@@ -245,6 +265,10 @@ src/
 ├── todo.ts         # Task management
 ├── subagent.ts     # Sub-agent spawning
 └── tokenplan.ts    # MiniMax Token Plans
+site/
+├── index.html      # Landing page
+├── styles.css      # Dark theme with glassmorphism
+└── script.js       # Animations & interactivity
 ```
 
 ---

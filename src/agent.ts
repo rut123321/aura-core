@@ -25,6 +25,8 @@ import {
 import type {
   AgentConfig,
   AgentRunResult,
+  AskUserInput,
+  AskUserFn,
   ConfirmFn,
   ContentBlockParam,
   ExecuteShellInput,
@@ -60,6 +62,7 @@ const SYSTEM_PROMPT = `You are Aura-Core, an elite autonomous AI coding agent op
 - search_files(pattern, path?, include?): Search for text pattern across files. Returns matches with line numbers. More efficient than reading every file.
 - glob(pattern, path?): Find files by name pattern (e.g. '**/*.ts'). Returns matching paths without reading contents.
 - web_search(query, maxResults?): Search the web for documentation, solutions, or up-to-date info. Use when you need external knowledge.
+- ask_user(question, options?): Ask the user a question with optional predefined answer options. Use when you need clarification, input, or a decision to continue.
 
 ## WORKFLOW
 1. ANALYZE: Call list_files to understand structure. Call view_file on relevant files.
@@ -144,6 +147,7 @@ function toolGlyph(name: string): string {
     list_files: "\u2731",
     search_files: "\u2731",
     glob: "\u2731",
+    ask_user: "?",
   };
   return glyphs[name] ?? "\u2699";
 }
@@ -152,6 +156,7 @@ function toolColor(name: string): (s: string) => string {
   if (name === "execute_shell") return COL.peach;
   if (name === "view_file") return COL.blue;
   if (name === "write_file" || name === "patch_file") return COL.blue;
+  if (name === "ask_user") return COL.purple;
   return COL.peach;
 }
 
@@ -164,6 +169,7 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
     case "list_files": return `List ${(input.dir as string) ?? "."}`;
     case "search_files": return `Grep "${(input.pattern as string) ?? ""}"`;
     case "glob": return `Glob "${(input.pattern as string) ?? ""}"`;
+    case "ask_user": return `Ask "${((input.question as string) ?? "").slice(0, 50)}"`;
     default: return name;
   }
 }
@@ -309,6 +315,7 @@ export class Agent {
   private openaiClient: OpenAI | null = null;
   private config: AgentConfig;
   private confirmFn: ConfirmFn;
+  private askUserFn: AskUserFn;
   private conversation: MessageParam[] = [];
   private selfHealingAttempts = 0;
   private forceStop = false;
@@ -317,9 +324,10 @@ export class Agent {
   private totalOutputTokens = 0;
   private interrupted = false;
 
-  constructor(config: AgentConfig, confirmFn: ConfirmFn) {
+  constructor(config: AgentConfig, confirmFn: ConfirmFn, askUserFn: AskUserFn) {
     this.config = config;
     this.confirmFn = confirmFn;
+    this.askUserFn = askUserFn;
 
     if (config.providerType === "anthropic") {
       const opts: ConstructorParameters<typeof Anthropic>[0] = { apiKey: config.apiKey };
@@ -824,10 +832,12 @@ export class Agent {
           return await this.handleGlob(block, input as unknown as GlobInput);
         case "web_search":
           return await this.handleWebSearch(block, input as unknown as WebSearchInput);
+        case "ask_user":
+          return await this.handleAskUser(block, input as unknown as AskUserInput);
         default:
           return {
             toolUseId: block.id,
-            content: `Unknown tool: "${block.name}". Available: list_files, view_file, write_file, patch_file, execute_shell, search_files, glob, web_search.`,
+            content: `Unknown tool: "${block.name}". Available: list_files, view_file, write_file, patch_file, execute_shell, search_files, glob, web_search, ask_user.`,
             isError: true, isShellFailure: false,
           };
       }
@@ -981,6 +991,18 @@ export class Agent {
       return { toolUseId: block.id, content, isError: false, isShellFailure: false };
     } catch (error) {
       printToolError("web_search", { query: input.query }, error instanceof Error ? error.message : String(error));
+      return { toolUseId: block.id, content: `Error: ${error instanceof Error ? error.message : String(error)}`, isError: true, isShellFailure: false };
+    }
+  }
+
+  private async handleAskUser(block: ToolUseBlock, input: AskUserInput): Promise<ToolExecutionResult> {
+    printToolPending("ask_user", { question: input.question });
+    try {
+      const answer = await this.askUserFn(input.question, input.options);
+      printToolDone("ask_user", { question: input.question }, true, answer.slice(0, 80));
+      return { toolUseId: block.id, content: answer, isError: false, isShellFailure: false };
+    } catch (error) {
+      printToolError("ask_user", { question: input.question }, error instanceof Error ? error.message : String(error));
       return { toolUseId: block.id, content: `Error: ${error instanceof Error ? error.message : String(error)}`, isError: true, isShellFailure: false };
     }
   }

@@ -799,4 +799,27 @@ export const TOOL_DEFINITIONS: Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "ask_user",
+    description:
+      "Ask the user a question with optional predefined answer options. " +
+      "Use this when you need clarification, additional input, or a decision from the user to continue. " +
+      "The user can select an option or type their own answer. " +
+      "Always provide clear, specific options when possible to make it easy for the user.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        question: {
+          type: "string",
+          description: "The question to ask the user.",
+        },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional predefined answer options the user can choose from.",
+        },
+      },
+      required: ["question"],
+    },
+  },
 ];

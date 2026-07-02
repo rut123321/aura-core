@@ -11,7 +11,9 @@ export type Provider =
   | "deepseek"
   | "mistral"
   | "cerebras"
-  | "MiniMax";
+  | "MiniMax"
+  | "openai-compatible"
+  | "anthropic-compatible";
 
 export type ProviderType = "anthropic" | "openai";
 
@@ -129,6 +131,26 @@ export const PROVIDERS: Record<Provider, ProviderConfig> = {
     color: pc.red,
     description: "MiniMax M3 · M2.7 · M2.5 — 1M context, frontier coding",
   },
+  "openai-compatible": {
+    type: "openai",
+    label: "OpenAI Compatible",
+    baseURL: undefined,
+    apiKeyEnv: ["OPENAI_COMPATIBLE_API_KEY"],
+    defaultModel: "gpt-4o",
+    supportsReasoning: false,
+    color: pc.cyan,
+    description: "Any OpenAI-compatible API (vLLM, Ollama, etc.)",
+  },
+  "anthropic-compatible": {
+    type: "anthropic",
+    label: "Anthropic Compatible",
+    baseURL: undefined,
+    apiKeyEnv: ["ANTHROPIC_COMPATIBLE_API_KEY"],
+    defaultModel: "claude-3-5-sonnet-20241022",
+    supportsReasoning: true,
+    color: pc.magenta,
+    description: "Any Anthropic-compatible API (AWS Bedrock, GCP, etc.)",
+  },
 };
 
 export const PROVIDER_LIST: Provider[] = [
@@ -142,6 +164,8 @@ export const PROVIDER_LIST: Provider[] = [
   "openrouter",
   "mistral",
   "cerebras",
+  "openai-compatible",
+  "anthropic-compatible",
 ];
 
 export const REASONING_BUDGETS: Record<Exclude<ReasoningEffort, "off">, number> = {
@@ -201,6 +225,7 @@ export interface ModelInfo {
 }
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
+export type AskUserFn = (question: string, options?: string[]) => Promise<string>;
 
 export type ToolName =
   | "list_files"
@@ -210,7 +235,8 @@ export type ToolName =
   | "execute_shell"
   | "search_files"
   | "glob"
-  | "web_search";
+  | "web_search"
+  | "ask_user";
 
 export interface ListFilesInput { dir: string; }
 export interface ViewFileInput { path: string; }
@@ -220,6 +246,7 @@ export interface ExecuteShellInput { command: string; timeout?: number; }
 export interface SearchFilesInput { pattern: string; path?: string; include?: string; }
 export interface GlobInput { pattern: string; path?: string; }
 export interface WebSearchInput { query: string; maxResults?: number; }
+export interface AskUserInput { question: string; options?: string[]; }
 
 export interface ShellResult {
   stdout: string;
