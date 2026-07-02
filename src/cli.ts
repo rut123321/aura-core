@@ -18,7 +18,7 @@ import {
   saveSession, loadSession, listSessions, listSessionsDetailed, exportSessionMarkdown, getSessionDir,
   loadGlobalSettings, saveGlobalSettings, autoSaveSession,
 } from "./session";
-import type { GlobalSettings } from "./session";
+import type { GlobalSettings, SessionSummary } from "./session";
 
 import {
   addContextFile, dropContextFile, getContextFiles, clearContextFiles,
@@ -34,7 +34,7 @@ import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./t
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 
 const BANNER = [
   "",
@@ -375,6 +375,7 @@ interface ReplState {
 }
 
 async function handleProviderSwitch(state: ReplState, workdir: string): Promise<void> {
+  autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
   const newProvider = await selectProvider();
   if (!newProvider) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
   const apiKey = await getApiKeyForProvider(newProvider);
@@ -395,6 +396,7 @@ async function handleProviderSwitch(state: ReplState, workdir: string): Promise<
 }
 
 async function handleModelSwitch(state: ReplState, workdir: string): Promise<void> {
+  autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
   const modelInfo = await selectModelInteractive(state.config.provider, state.config.apiKey);
   if (!modelInfo) { console.log(`\n  ${pc.gray("⊘ Cancelled")}\n`); return; }
   const prevHistory = state.agent.getConversation();
@@ -848,21 +850,34 @@ function handleSessionsList(): void {
   console.log();
 }
 
+function buildSessionOptions(sessions: SessionSummary[]): Array<{ value: string; label: string; hint: string }> {
+  const named = sessions.filter(s => !s.name.startsWith("auto-"));
+  const auto = sessions.filter(s => s.name.startsWith("auto-"));
+  const opts: Array<{ value: string; label: string; hint: string }> = [];
+  for (const s of named) {
+    opts.push({ value: s.name, label: pc.white(s.name), hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}` });
+  }
+  if (named.length > 0 && auto.length > 0) {
+    opts.push({ value: "\0separator", label: pc.gray("── auto-saved ──"), hint: "" });
+  }
+  for (const s of auto) {
+    opts.push({ value: s.name, label: pc.gray(s.name), hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}` });
+  }
+  return opts;
+}
+
 async function handleResume(state: ReplState): Promise<void> {
   const sessions = listSessionsDetailed();
   if (sessions.length === 0) {
     console.log(`\n  ${pc.gray("No saved sessions.")}\n`);
     return;
   }
+  const options = buildSessionOptions(sessions);
   const selected = await p.select({
     message: "Resume session:",
-    options: sessions.map(s => ({
-      value: s.name,
-      label: pc.white(s.name),
-      hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}`,
-    })),
+    options,
   });
-  if (p.isCancel(selected)) { console.log(`\n  ${pc.gray("Cancelled")}\n`); return; }
+  if (p.isCancel(selected) || selected === "\0separator") { console.log(`\n  ${pc.gray("Cancelled")}\n`); return; }
   const name = selected as string;
   const data = loadSession(name);
   if (!data) { console.log(`\n  ${pc.red("✗")} ${pc.red(`Session not found: ${name}`)}\n`); return; }
@@ -1493,15 +1508,12 @@ async function main(): Promise<void> {
         initialValue: false,
       });
       if (!p.isCancel(resume) && resume) {
+        const options = buildSessionOptions(sessions);
         const selected = await p.select({
           message: "Choose session:",
-          options: sessions.map(s => ({
-            value: s.name,
-            label: pc.white(s.name),
-            hint: `${s.provider} · ${s.model} · ${s.messageCount} msgs · ${fmtDate(s.timestamp)}`,
-          })),
+          options,
         });
-        if (!p.isCancel(selected)) {
+        if (!p.isCancel(selected) && selected !== "\0separator") {
           const name = selected as string;
           const data = loadSession(name);
           if (data) {

@@ -4,9 +4,10 @@
   </h1>
   <p><strong>Autonomous AI coding agent for the terminal</strong></p>
   <p>
-    <a href="https://www.npmjs.com/package/aura-core"><img src="https://img.shields.io/npm/v/aura-core" alt="npm version"></a>
+    <a href="https://github.com/rut123321/aura-core/releases"><img src="https://img.shields.io/github/v/release/rut123321/aura-core" alt="version"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
     <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-%23f9f9f9" alt="Bun runtime"></a>
+    <a href="https://github.com/rut123321/aura-core/actions"><img src="https://img.shields.io/github/actions/workflow/status/rut123321/aura-core/ci.yml?label=CI" alt="CI status"></a>
     <a href="https://github.com/rut123321/aura-core/issues"><img src="https://img.shields.io/github/issues/rut123321/aura-core" alt="GitHub issues"></a>
   </p>
   <br>
@@ -15,6 +16,8 @@
 **aura-core** is an elite autonomous AI coding agent that operates directly in your terminal. It follows the **ReAct (Reasoning → Action → Observation)** loop to understand, modify, and manage codebases with minimal supervision.
 
 It supports **10 AI providers**, **50+ models**, and comes with **8 native tools** — file read/write/patch, shell execution, glob, search, web search, and file watching.
+
+Sessions auto-save after every interaction and restore on restart. Your last provider, model, and API key are persisted locally.
 
 ---
 
@@ -35,14 +38,20 @@ It supports **10 AI providers**, **50+ models**, and comes with **8 native tools
 | **OpenRouter** | All OpenRouter models | varies |
 
 ### 8 Native Tools
-- `list_files` — Map project structure
+- `list_files` — Map project structure (respects .gitignore)
 - `view_file` — Read file contents
 - `write_file` — Create new files
 - `patch_file` — Surgical edits (saves tokens)
-- `execute_shell` — Run commands
-- `search_files` — Full-text search (ripgrep)
-- `glob` — Pattern-based file matching
+- `execute_shell` — Run commands (dangerous commands blocked)
+- `search_files` — Full-text search
+- `glob` — Pattern-based file matching (`minimatch`-powered)
 - `web_search` — Real-time web queries
+
+### Session & Persistence
+- **Auto-save** after every REPL interaction (last 10 kept)
+- **Auto-restore** on next launch — pick a session to resume
+- **API key persistence** — entered once, reused next time (not from env)
+- **Global settings** — last provider, model, reasoning saved to `~/.aura-core/settings.json`
 
 ### Workflow Commands
 | Command | Description |
@@ -70,7 +79,7 @@ It supports **10 AI providers**, **50+ models**, and comes with **8 native tools
 | `/init` | Create AURA.md project context |
 | `/save` `[name]` | Save session |
 | `/load` `[name]` | Load session |
-| `/resume` | Pick a saved session to resume |
+| `/resume` | Pick a saved session to resume (shows history) |
 | `/sessions` | List saved sessions |
 | `/export` | Export to Markdown |
 | `/todo` | Task management |
@@ -83,7 +92,7 @@ It supports **10 AI providers**, **50+ models**, and comes with **8 native tools
 | `@filename` | Inline file reference |
 
 ### Self-Healing
-When a shell command or file write fails, aura-core automatically analyzes the error and retries with a corrected approach — up to 3 attempts by default.
+When a shell command or file write fails, aura-core automatically analyzes the error and retries with a corrected approach — up to 5 attempts by default.
 
 ---
 
@@ -99,13 +108,15 @@ curl -fsSL https://bun.sh/install | bash
 bunx aura-core
 ```
 
+Or download the pre-built binary from [Releases](https://github.com/rut123321/aura-core/releases).
+
 Or clone and run locally:
 
 ```bash
 git clone https://github.com/rut123321/aura-core.git
 cd aura-core
 bun install
-bun start
+bun run build   # produces aura.exe
 ```
 
 ### Set an API key
@@ -114,8 +125,9 @@ bun start
 export ANTHROPIC_API_KEY="sk-ant-..."
 # or
 export OPENAI_API_KEY="sk-..."
-# or any provider from the list above
 ```
+
+If no env var is set, you'll be prompted to enter the key — it will be saved for next time.
 
 ### Use
 
@@ -123,12 +135,35 @@ export OPENAI_API_KEY="sk-..."
 # One-shot instruction
 aura "Fix all TODOs in the codebase"
 
-# Interactive REPL
+# Interactive REPL (auto-resume prompt if sessions exist)
 aura
 
 # Specify model and reasoning
 aura -p deepseek -m deepseek-reasoner -r high "Refactor the auth module"
 ```
+
+---
+
+## Project Detection
+
+aura-core auto-detects your project type and suggests the right test/build/lint commands:
+
+| File | Detected as |
+|---|---|
+| `bun.lock` / `bunfig.toml` | Bun |
+| `package.json` | Node.js |
+| `pyproject.toml` / `setup.py` | Python |
+| `Cargo.toml` | Rust |
+| `go.mod` | Go |
+| `Gemfile` | Ruby |
+| `pom.xml` / `build.gradle` | Java (Maven/Gradle) |
+| `mix.exs` | Elixir |
+| `Package.swift` | Swift |
+| `composer.json` | PHP |
+| `*.sln` / `*.csproj` | .NET / C# |
+| `deno.json` / `deno.jsonc` | Deno |
+| `CMakeLists.txt` | C/C++ (CMake) |
+| `Makefile` | C/C++ (Make) |
 
 ---
 
@@ -162,7 +197,7 @@ Create a task in `.vscode/tasks.json`:
 
 ```json
 {
-  "version": "2.0.0",
+  "version": "2.1.0",
   "tasks": [{
     "label": "Aura: AI Agent",
     "type": "shell",
@@ -171,9 +206,6 @@ Create a task in `.vscode/tasks.json`:
   }]
 }
 ```
-
-### JetBrains
-Create a "Run Configuration" of type "Shell Script" with command `bunx aura-core`.
 
 ---
 
@@ -184,12 +216,13 @@ Create a "Run Configuration" of type "Shell Script" with command `bunx aura-core
 | Providers | 10+ | 1 (Anthropic) | 1 (Anthropic) | 1 (Anthropic) |
 | Open Source | ✓ MIT | ✗ | ✗ | ✓ Apache 2.0 |
 | Self-Healing | ✓ | ✓ | ✗ | ✗ |
-| Session Save/Load | ✓ | ✗ | ✗ | ✓ |
+| Session Auto-Save | ✓ | ✗ | ✗ | ✗ |
+| Session Resume | ✓ | ✗ | ✗ | ✗ |
 | File Watching | ✓ | ✗ | ✗ | ✗ |
 | Web Search | ✓ | ✗ | ✗ | ✗ |
 | PR Creation | ✓ | ✗ | ✓ | ✗ |
-| Todo/Memory | ✓ | ✗ | ✗ | ✓ |
-| Token Plans | ✓ | ✗ | ✗ | ✗ |
+| API Key Persist | ✓ | ✗ | ✗ | ✗ |
+| Project Detection | 15 types | — | — | — |
 
 ---
 
@@ -197,17 +230,17 @@ Create a "Run Configuration" of type "Shell Script" with command `bunx aura-core
 
 ```
 src/
-├── cli.ts          # Entry point — REPL & CLI
-├── agent.ts        # ReAct loop — tool calling, self-healing
-├── tools.ts        # Tool implementations (8 tools)
-├── types.ts        # Type definitions & provider configs
-├── models.ts       # Model selection & listing
-├── config.ts       # Project detection & config loading
-├── context.ts      # File context management
-├── session.ts      # Session save/load/export
-├── git.ts          # Git operations
+├── cli.ts          # Entry point — REPL & CLI (1500+ lines)
+├── agent.ts        # ReAct loop — streaming, tool execution, self-healing
+├── tools.ts        # Tool implementations (8 tools) + backup/undo
+├── types.ts        # Type definitions, provider configs, pricing
+├── models.ts       # Model definitions & selection
+├── config.ts       # Project detection (15 types) & config loading
+├── context.ts      # File context, AURA.md, MEMORY.md
+├── session.ts      # Session save/load/export, global settings, auto-save
+├── git.ts          # Git operations (status, diff, commit, branch)
 ├── diff.ts         # Diff generation & web search
-├── pr.ts           # GitHub PR creation
+├── pr.ts           # GitHub PR creation (via gh CLI)
 ├── watcher.ts      # File watcher for auto-test
 ├── todo.ts         # Task management
 ├── subagent.ts     # Sub-agent spawning
@@ -218,7 +251,7 @@ src/
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or PR.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
