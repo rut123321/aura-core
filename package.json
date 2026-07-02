@@ -1,6 +1,6 @@
 {
   "name": "aura-core",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Autonomous AI coding agent for the terminal — ReAct loop, native tool calling, self-healing",
   "type": "module",
   "bin": {
@@ -25,7 +25,8 @@
     "openai": "^4.77.0",
     "ora": "^9.4.1",
     "picocolors": "^1.1.0",
-    "react": "^19.2.7"
+    "react": "^19.2.7",
+    "react-devtools-core": "^7.0.1"
   },
   "devDependencies": {
     "@types/bun": "latest",

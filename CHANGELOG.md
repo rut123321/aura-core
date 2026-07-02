@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.0] - 2026-07-03
+
+### Added
+- `src/format.ts` — comprehensive terminal formatting system with 40+ helpers
+- `src/ui/splash.tsx` — beautiful ink-based animated splash screen
+- `src/ui/app.tsx` — ink React app scaffold (reserved for future full-screen UI)
+- Unicode tool glyphs (⚙ ✎ ✑ ☰ ≡ ⌕ ⁎ ☁ ❓) for each agent tool
+- `sectionInline()`, `pendingAction()`, `labelValue()`, `runMetric()` for consistent section headers
+- `diffAdd()`, `diffDel()`, `diffContext()`, `diffHunk()`, `diffMore()` for color-coded diffs
+- `branchCurrent()`, `branchOther()` for branch listing with ●/○ indicators
+- `toolStart()`, `toolOk()`, `toolFail()` for agent tool call display
+- `thinking()`, `buildInfo()`, `interrupted()`, `compacting()`, `compacted()`, `healingLimit()`, `maxIterations()`, `declined()`, `blocked()` for agent status messages
+- `cmdOk()`, `cmdFail()` for shell command results with exit code
+
+### Changed
+- All CLI section headers use unified `sectionInline()` format (`◆ Title`)
+- Status bar uses `statusLine()` with `contextBar()` and `divider()`
+- Agent tool output uses `toolStart()`/`toolOk()`/`toolFail()` with Unicode glyphs
+- Agent shell command output uses `cmdOk()`/`cmdFail()` with exit code colors
+- All agent status messages (interrupted, compacting, healing, etc.) use format.ts helpers
+- Banner uses clean divider lines
+- Session info uses `sessionLine()` showing model · provider · reasoning · workdir
+- Windows `\r\n` console.log override preserved
+
 ## [2.1.0] - 2026-07-02
 
 ### Added

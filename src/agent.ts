@@ -2,6 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import pc from "picocolors";
 import { PROVIDERS, REASONING_BUDGETS, PROVIDER_PRICING } from "./types";
+import {
+  toolStart, toolOk, toolFail,
+  buildInfo as fmtBuildInfo,
+  interrupted as fmtInterrupted, compacting as fmtCompacting,
+  compacted as fmtCompacted, healingLimit as fmtHealingLimit,
+  maxIterations as fmtMaxIterations, declined as fmtDeclined,
+  cmdOk, cmdFail, blocked as fmtBlocked,
+} from "./format";
 import { buildFullSystemPrompt } from "./context";
 import { webSearch, previewFileWrite, previewFilePatch, printDiffPreview } from "./diff";
 import { detectProjectType } from "./config";
@@ -126,28 +134,6 @@ class BrailleSpinner {
   }
 }
 
-function toolGlyph(name: string): string {
-  const glyphs: Record<string, string> = {
-    execute_shell: "$",
-    view_file: "\u2192",
-    write_file: "\u2190",
-    patch_file: "\u2190",
-    list_files: "\u2731",
-    search_files: "\u2731",
-    glob: "\u2731",
-    ask_user: "?",
-  };
-  return glyphs[name] ?? "\u2699";
-}
-
-function toolColor(name: string): (s: string) => string {
-  if (name === "execute_shell") return COL.peach;
-  if (name === "view_file") return COL.blue;
-  if (name === "write_file" || name === "patch_file") return COL.blue;
-  if (name === "ask_user") return COL.purple;
-  return COL.peach;
-}
-
 function toolLabel(name: string, input: Record<string, unknown>): string {
   switch (name) {
     case "execute_shell": return truncateCmd((input.command as string) ?? "", 60);
@@ -169,24 +155,20 @@ function clearToolSpinner(): void {
 
 function printToolPending(name: string, input: Record<string, unknown>): void {
   clearToolSpinner();
-  const color = toolColor(name);
   const label = toolLabel(name, input);
-  console.log(`   ${color(toolGlyph(name))} ${pc.gray(label)}`);
+  console.log(toolStart(name, label));
 }
 
 function printToolDone(name: string, input: Record<string, unknown>, success: boolean, detail?: string): void {
   clearToolSpinner();
-  const color = success ? toolColor(name) : COL.red;
   const label = toolLabel(name, input);
-  const detailStr = detail ? ` ${pc.gray(detail)}` : "";
-  const icon = success ? color("\u2713") : COL.red("\u2717");
-  console.log(`   ${icon} ${success ? pc.gray(label) : COL.red(label)}${detailStr}`);
+  console.log(success ? toolOk(label, detail) : toolFail(label));
 }
 
 function printToolError(name: string, input: Record<string, unknown>, error: string): void {
   clearToolSpinner();
   const label = toolLabel(name, input);
-  console.log(`   ${COL.red("\u2717")} ${COL.red(label)}`);
+  console.log(toolFail(label, error));
   console.log(`     ${COL.red(error.slice(0, 100))}`);
 }
 
@@ -294,11 +276,11 @@ function buildRawMessage(
   } as unknown as RawMessage;
 }
 
-function printFooter(agentColor: (s: string) => string, model: string, durationMs: number): void {
+function printFooter(model: string, durationMs: number): void {
   const sec = (durationMs / 1000).toFixed(1);
   const shortModel = model.split("/").pop() ?? model;
   console.log();
-  console.log(`   ${agentColor("*")} ${pc.gray("Build")} ${pc.gray("|")} ${pc.gray(shortModel)} ${pc.gray("|")} ${pc.gray(sec + "s")}`);
+  console.log(fmtBuildInfo(shortModel, parseFloat(sec)));
 }
 
 export class Agent {
@@ -404,7 +386,7 @@ export class Agent {
   }
 
   private async autoCompact(): Promise<void> {
-    console.log(`\n   ${pc.gray("\u25B3")} ${pc.gray("Auto-compacting context...")}`);
+    console.log(`\n${fmtCompacting()}`);
     const summaryPrompt = "Summarize our conversation so far in 5-10 bullet points. Include key decisions, files changed, and remaining tasks. Be extremely concise.";
     this.conversation.push({ role: "user", content: summaryPrompt });
     const prevHistory = this.conversation;
@@ -426,7 +408,7 @@ export class Agent {
     }
     if (summary) {
       this.conversation = [{ role: "user", content: `Previous conversation summary:\n${summary}` }];
-      console.log(`   ${pc.gray("\u2713")} ${pc.gray("Compacted")} ${pc.gray(`(${prevHistory.length} messages -> 1)`)}`);
+      console.log(fmtCompacted(prevHistory.length));
     }
   }
 
@@ -446,7 +428,7 @@ export class Agent {
     } catch (error) {
       clearToolSpinner();
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(`\n   ${COL.red("\u25A3")} ${COL.red("Error:")} ${COL.red(msg)}`);
+      console.error(`\n   ${pc.red("\u25A3")} ${pc.red("Error:")} ${pc.red(msg)}`);
       return {
         success: false,
         iterations: this.iterations - startIterations,
@@ -457,8 +439,7 @@ export class Agent {
 
     clearToolSpinner();
     const duration = Date.now() - startTime;
-    const c = providerColor(this.config.provider);
-    printFooter(c, this.config.model, duration);
+    printFooter(this.config.model, duration);
 
     const lastAssistant = [...this.conversation].reverse().find((m) => m.role === "assistant");
     let finalText = "";
@@ -486,7 +467,7 @@ export class Agent {
       this.iterations++;
       if (this.forceStop) break;
       if (this.interrupted) {
-        console.log(`\n   ${COL.orange("\u25CB")} ${pc.gray("Interrupted")}`);
+        console.log(`\n${fmtInterrupted()}`);
         this.conversation.push({
           role: "user",
           content: "The user interrupted the previous task. Please acknowledge and stop.",
@@ -495,7 +476,7 @@ export class Agent {
       }
 
       if (this.selfHealingAttempts >= this.config.maxSelfHealingAttempts) {
-        console.log(`\n   ${COL.orange("\u25B3")} ${COL.orange("Self-healing limit")} ${pc.gray(`(${this.config.maxSelfHealingAttempts} attempts)`)}`);
+        console.log(`\n${fmtHealingLimit(this.config.maxSelfHealingAttempts)}`);
         this.conversation.push({
           role: "user",
           content: `SELF-HEALING LIMIT REACHED (${this.config.maxSelfHealingAttempts} failed attempts). Stop trying to fix the issue. Provide a clear summary of what went wrong and what the user should do manually to resolve it.`,
@@ -550,7 +531,7 @@ export class Agent {
     }
 
     if (this.iterations >= MAX_ITERATIONS) {
-      console.log(`\n   ${COL.orange("\u25B3")} ${COL.orange("Max iterations")} ${pc.gray(`(${MAX_ITERATIONS})`)}`);
+      console.log(`\n${fmtMaxIterations(MAX_ITERATIONS)}`);
     }
     clearToolSpinner();
   }
@@ -853,7 +834,7 @@ export class Agent {
           printDiffPreview(input.path, preview.diff, preview.isWrite);
           const confirmed = await this.confirmFn(`Write ${input.path}`);
           if (!confirmed) {
-            console.log(`     ${COL.red("\u2190")} ${COL.red("Declined")}`);
+            console.log(fmtDeclined());
             return { toolUseId: block.id, content: `User declined to write: ${input.path}`, isError: true, isShellFailure: false };
           }
         }
@@ -878,7 +859,7 @@ export class Agent {
           printDiffPreview(input.path, preview.diff, false);
           const confirmed = await this.confirmFn(`Edit ${input.path}`);
           if (!confirmed) {
-            console.log(`     ${COL.red("\u2190")} ${COL.red("Declined")}`);
+            console.log(fmtDeclined());
             return { toolUseId: block.id, content: `User declined to edit: ${input.path}`, isError: true, isShellFailure: false };
           }
         }
@@ -896,15 +877,14 @@ export class Agent {
     const check = shouldConfirmCommand(input.command);
 
     if (check.blocked) {
-      console.log(`     ${COL.red("$")} ${COL.red("Blocked:")} ${COL.red(check.reason)}`);
+      console.log(fmtBlocked(check.reason));
       return { toolUseId: block.id, content: `Command blocked: ${check.reason}. Choose a safer alternative.`, isError: true, isShellFailure: false };
     }
 
     if (check.confirm && !this.config.autoConfirm) {
       const confirmed = await this.confirmFn(`Execute (${check.reason}): ${truncateCmd(input.command, 100)}`);
       if (!confirmed) {
-        const cmdStr = truncateCmd(input.command, 50);
-        console.log(`     ${COL.red("$")} ${COL.red(cmdStr)}`);
+        console.log(cmdFail(input.command));
         return { toolUseId: block.id, content: `User declined: ${input.command}`, isError: true, isShellFailure: false };
       }
     }
@@ -914,15 +894,15 @@ export class Agent {
       const result = await toolExecuteShell(input.command, this.config.workingDirectory, input.timeout ?? 60_000);
       spinner.stop();
       if (result.success) {
-        console.log(`     ${COL.peach("$")} ${pc.gray(truncateCmd(input.command, 50))} ${COL.green("exit 0")}`);
+        console.log(cmdOk(input.command, 0));
       } else {
-        console.log(`     ${COL.red("$")} ${COL.red(truncateCmd(input.command, 50))} ${COL.red("exit " + result.exitCode)}`);
+        console.log(cmdOk(input.command, result.exitCode));
       }
       const output = `Exit code: ${result.exitCode}\n--- stdout ---\n${result.stdout || "(empty)"}\n--- stderr ---\n${result.stderr || "(empty)"}`;
       return { toolUseId: block.id, content: output, isError: !result.success, isShellFailure: !result.success };
     } catch (error) {
       spinner.stop();
-      console.log(`     ${COL.red("$")} ${COL.red("Failed:")} ${COL.red(truncateCmd(input.command, 50))}`);
+      console.log(cmdFail(input.command));
       return { toolUseId: block.id, content: `Shell error: ${error instanceof Error ? error.message : String(error)}`, isError: true, isShellFailure: false };
     }
   }

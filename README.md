@@ -51,12 +51,20 @@ Sessions auto-save after every interaction and restore on restart. Your last pro
 - `ask_user` — Ask you questions with predefined options or free-text input
 
 ### Beautiful Terminal UI
-- **Gradient banner** — Multi-color logo on startup
+- **Comprehensive formatting system** — 40+ `format.ts` helpers for consistent, beautiful output across all commands
+- **Boxed sections** — All model info, session status, cost breakdowns framed in rounded boxes
 - **Interactive command picker** — Type `/` to open a categorized command select menu with inline arg prompts
-- **Tables** — Structured data displayed in clean tables (`/cost`, `/model`, `status`, `/sessions`, `/plans`, `--list-models`)
-- **Spinners** — Visual progress indicators for long-running operations
+- **Unicode tool icons** — Each tool has a unique glyph (⚙ ✎ ✑ ☰ ≡ ⌕ ⁎ ☁ ❓)
+- **Clean tables** — Structured data in Unicode-bordered tables (`/cost`, `/model`, `status`, `/sessions`, `/plans`, `--list-models`)
+- **Animated spinners** — Visual progress indicators for long-running operations
 - **Context progress bar** — Visual █ bar showing context window usage
+- **Diff highlighting** — Color-coded diff display (green additions, red deletions, cyan hunks)
+- **Branch visualization** — Current branch shown as ●, others as ○
+- **Reasoning badge** — Color-coded reasoning effort indicator (off/green/yellow/magenta/red)
 - **Command categories** — Help organized by Git, Code Quality, Sessions, etc.
+- **Consistent status messages** — ✓ success, ✗ error, ⚠ warning, ℹ info, ⊘ cancelled
+- **Session summary** — Model · Provider · Reasoning · Workdir on one line
+- **Shell command display** — Colored $ with exit code, truncated long commands
 
 ### Session & Persistence
 - **Auto-save** after every REPL interaction (last 10 kept)
@@ -250,9 +258,9 @@ Create a task in `.vscode/tasks.json`:
 
 ```
 src/
-├── cli.ts          # Entry point — REPL, commands, command picker, tables, spinners
+├── cli.ts          # Entry point — REPL, commands, command picker
 ├── agent.ts        # ReAct loop — streaming, tool execution, self-healing
-├── tools.ts        # Tool implementations (9 tools) + backup/undo
+├── tools.ts        # Tool implementations + backup/undo
 ├── types.ts        # Type definitions, 12 provider configs, pricing
 ├── models.ts       # Model definitions & selection
 ├── config.ts       # Project detection (15 types) & config loading
@@ -264,7 +272,12 @@ src/
 ├── watcher.ts      # File watcher for auto-test
 ├── todo.ts         # Task management
 ├── subagent.ts     # Sub-agent spawning
-└── tokenplan.ts    # MiniMax Token Plans
+├── tokenplan.ts    # MiniMax Token Plans
+├── format.ts       # Terminal UI formatting (40+ helpers)
+└── ui/             # Ink/React components (scaffold)
+    ├── index.tsx
+    ├── splash.tsx
+    └── app.tsx
 site/
 ├── index.html      # Landing page
 ├── styles.css      # Dark theme with glassmorphism

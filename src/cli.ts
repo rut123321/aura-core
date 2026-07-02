@@ -2,7 +2,6 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import ora from "ora";
-import boxen from "boxen";
 import Table from "cli-table3";
 import { Agent } from "./agent";
 import { selectModelInteractive } from "./models";
@@ -13,6 +12,12 @@ import {
   REASONING_LABELS,
 } from "./types";
 import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
+import {
+  C, box, statusLine, contextBar, createTable,
+  sectionInline, pendingAction, divider,
+  successLabel, errorLabel, greeting, sessionLine,
+  reasonBadge as fmtReasonBadge,
+} from "./format";
 
 // @ts-ignore - intentional console.log override for Windows \r\n compat
 console.log = function (...args: unknown[]) {
@@ -46,15 +51,7 @@ import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./t
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const VERSION = "2.1.0";
-
-const BANNER_LINES = [
-  "",
-  pc.cyan("  AURA") + pc.magenta(" CORE"),
-  pc.dim(pc.white("  autonomous ai coding agent")) + pc.bold(pc.magenta("  v" + VERSION)),
-  pc.dim("  github.com/rut123321/aura-core"),
-  "",
-];
+const VERSION = "2.2.0";
 
 function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
@@ -69,23 +66,12 @@ function pBadge(provider: Provider): string {
   return c(PROVIDERS[provider].label);
 }
 
-function infoBox(title: string, text: string, color: string = "cyan"): string {
-  return boxen(text, {
-    padding: { top: 0, bottom: 0, left: 2, right: 2 },
-    margin: { top: 0, bottom: 0, left: 2, right: 0 },
-    borderColor: color as "cyan" | "green" | "yellow" | "red" | "magenta" | "blue" | "white",
-    borderStyle: "round",
-    title,
-    titleAlignment: "left",
-  });
+function infoBox(title: string, text: string, color: "cyan" | "green" | "yellow" | "red" | "magenta" | "blue" = "cyan"): string {
+  return box(title, text, color);
 }
 
 function reasonBadge(effort: ReasoningEffort): string {
-  if (effort === "off") return pc.gray("off");
-  const colors: Record<string, (s: string) => string> = {
-    low: pc.green, medium: pc.yellow, high: pc.magenta, max: pc.red,
-  };
-  return (colors[effort] ?? pc.gray)(effort);
+  return fmtReasonBadge(effort);
 }
 
 function fmtTokens(n: number): string {
@@ -145,9 +131,10 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printBanner(): void {
-  for (const line of BANNER_LINES) {
-    console.log(line);
-  }
+  console.log(`  ${C.gray("\u2500").repeat(50)}`);
+  console.log(`  ${C.cyan(C.bold("AURA"))} ${C.magenta(C.bold("CORE"))}  ${C.dim("v"+VERSION)}`);
+  console.log(`  ${C.dim("autonomous AI coding agent")}`);
+  console.log(`  ${C.gray("\u2500").repeat(50)}`);
 }
 
 function printHelp(): void {
@@ -245,14 +232,14 @@ function printHelp(): void {
 function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEffort): void {
   const c = pColor(model.provider);
   console.log();
-  const info: string[] = [pc.bold(c(model.label))];
-  if (model.contextLength) info.push(`${pc.gray("ctx")} ${pc.white(model.contextLength.toLocaleString())}`);
-  if (effort !== "off") info.push(reasonBadge(effort));
-  info.push(pc.gray(workdir));
-  console.log(`   ${info.join(` ${pc.gray("|")} `)}`);
+  const line = sessionLine(c(model.label), PROVIDERS[model.provider].label, workdir, effort === "off" ? undefined : effort);
+  console.log(line);
+  if (model.contextLength) {
+    console.log(`  ${C.dim("context:")} ${C.white(model.contextLength.toLocaleString() + " tokens")}`);
+  }
   const initFile = loadInitFile(workdir);
   if (initFile) {
-    console.log(`   ${pc.gray("*")} ${pc.gray("AURA.md loaded")}`);
+    console.log(`  ${C.dim("init:")} ${C.green("AURA.md loaded")}`);
   }
   console.log();
 }
@@ -309,8 +296,7 @@ function printPreviousConversation(conv: unknown[]): void {
 }
 
 function printReplHeader(): void {
-  const g = pc.gray, c = pc.cyan;
-  console.log(g("  ") + c("o ") + g("ready") + g(" | ") + g("type your task or") + c(" /") + g(" for commands"));
+  console.log(greeting());
   console.log();
 }
 
@@ -318,37 +304,34 @@ function printStatusBar(state: ReplState): void {
   const usage = state.agent.getTokenUsage();
   const ctxLen = state.config.contextLength;
   const totalTokens = usage.total;
-  const pct = ctxLen && ctxLen > 0 ? Math.min(100, (totalTokens / ctxLen) * 100) : 0;
   const cost = state.agent.getCost();
   const shortModel = state.modelInfo.label;
-  const c = pColor(state.modelInfo.provider);
+  const providerColor = pColor(state.modelInfo.provider);
 
-  const modelTag = c(pc.bold(shortModel));
-  const providerTag = pc.gray(PROVIDERS[state.config.provider].label);
-
-  const parts: string[] = [modelTag, providerTag];
+  const parts: string[] = [
+    providerColor(C.bold(shortModel)),
+    C.gray(PROVIDERS[state.config.provider].label),
+  ];
 
   if (state.config.reasoningEffort !== "off") {
     parts.push(reasonBadge(state.config.reasoningEffort));
   }
 
   if (ctxLen && ctxLen > 0 && totalTokens > 0) {
-    const barLen = 10;
-    const filled = Math.round((pct / 100) * barLen);
-    const bar = pc.green("\u2588".repeat(filled)) + pc.gray("\u2588".repeat(barLen - filled));
-    parts.push(pc.gray(`ctx ${bar} ${pct.toFixed(0)}%`));
+    parts.push(contextBar(totalTokens, ctxLen));
   }
 
   if (cost.total > 0) {
-    parts.push(pc.gray(fmtCost(cost.total)));
+    parts.push(C.gray(fmtCost(cost.total)));
   }
 
   const historyLen = state.agent.getHistoryLength();
   if (historyLen > 0) {
-    parts.push(pc.gray(`${historyLen} msgs`));
+    parts.push(C.gray(`${historyLen} msgs`));
   }
 
-  console.log(pc.gray("  -") + " " + parts.join(pc.gray(" | ")));
+  console.log(divider());
+  console.log(statusLine(parts));
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
@@ -554,24 +537,17 @@ function printModelInfo(state: ReplState): void {
   const c = pColor(model.provider);
   const usage = state.agent.getTokenUsage();
   const ctxLen = state.config.contextLength;
-  const t = new Table({
-    style: { head: ["cyan"], border: ["gray"] },
-    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
-             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
-             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
-             "right": "│", "right-mid": "┤" },
-    colWidths: [16, 50],
-  });
-  t.push([pc.bold("Property"), pc.bold("Value")]);
+  const t = createTable(["Property", "Value"], [16, 50]);
+  t.push([C.bold("Property"), C.bold("Value")]);
   t.push(["Model", c(model.label)]);
-  t.push(["ID", pc.dim(model.id)]);
+  t.push(["ID", C.gray(model.id)]);
   if (ctxLen) t.push(["Context", fmtTokens(ctxLen) + " tokens"]);
-  t.push(["Tools", model.supportsTools ? pc.green("✓") : pc.red("✗")]);
-  t.push(["Vision", model.supportsVision ? pc.green("✓") : pc.red("✗")]);
-  t.push(["Reasoning", model.supportsReasoning ? pc.green("✓") : pc.red("✗") + " (" + reasonBadge(state.config.reasoningEffort) + ")"]);
+  t.push(["Tools", model.supportsTools ? successLabel("yes") : errorLabel("no")]);
+  t.push(["Vision", model.supportsVision ? successLabel("yes") : errorLabel("no")]);
+  t.push(["Reasoning", model.supportsReasoning ? successLabel("yes") : errorLabel("no") + " (" + reasonBadge(state.config.reasoningEffort) + ")"]);
   if (usage.total > 0) t.push(["Tokens used", fmtTokens(usage.total)]);
   console.log();
-  console.log(`  ${pc.bold("Model Info")}`);
+  console.log(sectionInline("Model"));
   console.log(t.toString());
 }
 
@@ -580,52 +556,38 @@ function printStatus(state: ReplState): void {
   const cost = state.agent.getCost();
   const ctxFiles = getContextFiles();
   const modifiedFiles = state.agent.getModifiedFiles();
-  const t = new Table({
-    style: { head: ["cyan"], border: ["gray"] },
-    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
-             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
-             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
-             "right": "│", "right-mid": "┤" },
-    colWidths: [16, 60],
-  });
-  t.push([pc.bold("Property"), pc.bold("Value")]);
+  const t = createTable(["Property", "Value"], [16, 60]);
+  t.push([C.bold("Property"), C.bold("Value")]);
   t.push(["Model", pColor(state.modelInfo.provider)(state.modelInfo.label)]);
-  t.push(["Provider", pc.dim(PROVIDERS[state.config.provider].label)]);
+  t.push(["Provider", C.gray(PROVIDERS[state.config.provider].label)]);
   t.push(["Reasoning", reasonBadge(state.config.reasoningEffort)]);
   t.push(["History", String(state.agent.getHistoryLength()) + " messages"]);
   t.push(["Tokens", fmtTokens(usage.total)]);
   if (cost.total > 0) t.push(["Cost", fmtCost(cost.total)]);
   if (ctxFiles.length > 0) t.push(["Context files", ctxFiles.map(f => f.path).join(", ")]);
   if (modifiedFiles.length > 0) t.push(["Modified", String(modifiedFiles.length) + " files"]);
-  t.push(["Directory", pc.dim(process.cwd())]);
+  t.push(["Directory", C.gray(process.cwd())]);
   console.log();
-  console.log(`  ${pc.bold("Session Status")}`);
+  console.log(sectionInline("Session"));
   console.log(t.toString());
 }
 
 function printCost(state: ReplState): void {
   const cost = state.agent.getCost();
   const usage = state.agent.getTokenUsage();
-  const t = new Table({
-    style: { head: ["cyan"], border: ["gray"] },
-    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
-             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
-             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
-             "right": "│", "right-mid": "┤" },
-    colWidths: [14, 16],
-  });
-  t.push([pc.bold("Tokens"), pc.bold("Count")]);
+  const t = createTable(["Tokens", "Count"], [14, 16]);
+  t.push([C.bold("Tokens"), C.bold("Count")]);
   t.push(["Input", fmtTokens(usage.input)]);
   t.push(["Output", fmtTokens(usage.output)]);
-  t.push([pc.bold("Total"), pc.bold(fmtTokens(usage.total))]);
+  t.push([C.bold("Total"), C.bold(fmtTokens(usage.total))]);
   if (cost.total > 0) {
-    t.push([pc.bold("Cost"), pc.bold("")]);
+    t.push([C.bold("Cost"), C.bold("")]);
     t.push(["Input $", fmtCost(cost.input)]);
     t.push(["Output $", fmtCost(cost.output)]);
-    t.push([pc.green("Total $"), pc.green(fmtCost(cost.total))]);
+    t.push([C.green("Total $"), C.green(fmtCost(cost.total))]);
   }
   console.log();
-  console.log(`  ${pc.bold("Cost Breakdown")}`);
+  console.log(sectionInline("Cost"));
   console.log(t.toString());
 }
 
@@ -799,7 +761,7 @@ async function handleLog(state: ReplState): Promise<void> {
   if (!isRepo) { console.log(`\n  ${pc.gray("Not a git repo.")}\n`); return; }
   const log = await gitLog(workdir, 10);
   console.log();
-  console.log(`  ${pc.gray("◆")} ${pc.bold("Recent Commits")}`);
+    console.log(sectionInline("Recent Commits"));
   
   for (const line of log.split("\n")) {
     if (!line.trim()) continue;
@@ -816,7 +778,7 @@ async function handleBranch(state: ReplState): Promise<void> {
   if (!isRepo) { console.log(`\n  ${pc.gray("Not a git repo.")}\n`); return; }
   const { current, branches } = await gitBranch(workdir);
   console.log();
-  console.log(`  ${pc.gray("◆")} ${pc.bold("Branches")}`);
+  console.log(sectionInline("Branches"));
   
   for (const b of branches) {
     if (b === current) {
@@ -857,7 +819,7 @@ async function handleChanges(state: ReplState): Promise<void> {
   const isRepo = await isGitRepo(workdir);
   const aiModified = state.agent.getModifiedFiles();
   console.log();
-  console.log(`  ${pc.gray("◆")} ${pc.bold("Changes")}`);
+  console.log(sectionInline("Changes"));
   
   if (aiModified.length > 0) {
     console.log(`  ${pc.gray("AI modified this session:")}`);
@@ -896,7 +858,7 @@ function handleDropContext(args: string): void {
 function handleContextList(): void {
   const files = getContextFiles();
   console.log();
-  console.log(`  ${pc.gray("◆")} ${pc.bold("Context Files")}`);
+  console.log(sectionInline("Context Files"));
   
   if (files.length === 0) {
     console.log(`  ${pc.gray("No files in context. Use /add <file>")}`);
@@ -993,7 +955,7 @@ async function handleLoad(state: ReplState, args: string): Promise<void> {
 function handleSessionsList(): void {
   const sessions = listSessions();
   console.log();
-  console.log(`  ${pc.bold("Saved Sessions")}`);
+  console.log(sectionInline("Saved Sessions"));
 
   if (sessions.length === 0) {
     console.log(`  ${pc.dim("No saved sessions. Use /save [name]")}`);
@@ -1091,7 +1053,7 @@ async function handleReview(state: ReplState): Promise<void> {
     console.log(`\n  ${pc.gray("No changes to review.")}\n`);
     return;
   }
-  console.log(`\n  ${pc.gray("◆")} ${pc.gray("Reviewing changes...")}\n`);
+  console.log(`\n${pendingAction("Reviewing changes...")}\n`);
   await state.agent.run(`Review the following code changes and provide feedback. Point out any bugs, style issues, or improvements:\n\n${diff.slice(0, 20000)}`);
   console.log();
 }
@@ -1113,7 +1075,7 @@ async function handleTest(state: ReplState): Promise<void> {
   else if (ex(jp(workdir, "go.mod"))) cmd = "go test ./...";
   else cmd = "bun test";
 
-  console.log(`\n  ${pc.gray("◆")} ${pc.gray("Running tests:")} ${pc.white(cmd)}\n`);
+  console.log(`\n${pendingAction("Running tests:", cmd)}\n`);
   await state.agent.run(`Run the test suite for this project. Use execute_shell to run: ${cmd}. If tests fail, analyze the errors and fix them.`);
   console.log();
 }
@@ -1132,7 +1094,7 @@ async function handleLint(state: ReplState): Promise<void> {
   }
   else cmd = "npx tsc --noEmit";
 
-  console.log(`\n  ${pc.gray("◆")} ${pc.gray("Running linter:")} ${pc.white(cmd)}\n`);
+  console.log(`\n${pendingAction("Running linter:", cmd)}\n`);
   await state.agent.run(`Run the linter for this project. Use execute_shell to run: ${cmd}. If there are lint errors, fix them.`);
   console.log();
 }
@@ -1143,7 +1105,7 @@ async function handleExplain(state: ReplState, args: string): Promise<void> {
   const { existsSync: ex } = await import("node:fs");
   const { join: jp } = await import("node:path");
   if (!ex(jp(workdir, args))) { console.log(`\n  ${pc.red("✗")} ${pc.red(`File not found: ${args}`)}\n`); return; }
-  console.log(`\n  ${pc.gray("◆")} ${pc.gray("Explaining:")} ${pc.white(args)}\n`);
+  console.log(`\n${pendingAction("Explaining:", args)}\n`);
   await state.agent.run(`Read the file ${args} and explain what it does, its architecture, key functions, and any potential issues. Be thorough but concise.`);
   console.log();
 }
@@ -1904,7 +1866,7 @@ function printModelTable(models: ModelInfo[]): void {
     t.push([pc.dim(idD), c(m.label), tIcon, vIcon, rIcon, ctx]);
   }
   console.log();
-  console.log(`  ${pc.bold("Available Models")}`);
+  console.log(sectionInline("Available Models"));
   console.log(t.toString());
 }
 
