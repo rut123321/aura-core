@@ -99,6 +99,10 @@ const COL = {
   cyan: (s: string) => `\x1b[38;2;86;182;194m${s}\x1b[39m`,
 };
 
+function clearLine(): void {
+  process.stdout.write("\r\x1b[2K\r");
+}
+
 class BrailleSpinner {
   private frameIdx = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -126,7 +130,7 @@ class BrailleSpinner {
 
   stop(finalText?: string): void {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
-    process.stdout.write(`\r${" ".repeat((this.text.length + 4))}\r`);
+    clearLine();
     if (finalText) process.stdout.write(finalText + "\n");
   }
 }
@@ -606,12 +610,13 @@ export class Agent {
     stream.on("thinking", (thinking: string) => {
       if (firstThinking) {
         firstThinking = false;
-        thinkingTitle = thinking.slice(0, 60).replace(/\n/g, " ");
+        thinkingTitle = thinking.slice(0, 80).replace(/\n/g, " ");
         if (firstText) {
           spinner.stop();
           firstText = false;
         }
-        process.stdout.write(`   ${COL.orange("\u2823")} ${COL.orange("Thinking:")} ${pc.gray(thinkingTitle)}`);
+        clearLine();
+        console.log(`   ${COL.orange("\u2823")} ${COL.orange("Thinking:")} ${pc.gray(thinkingTitle)}`);
       }
     });
 
@@ -621,7 +626,7 @@ export class Agent {
         firstText = false;
         if (!firstThinking) {
           const dur = ((Date.now() - thinkingStart) / 1000).toFixed(1);
-          process.stdout.write(`\r${" ".repeat(80)}\r`);
+          clearLine();
           console.log(`   ${COL.orange("-")} ${COL.orange("Thought:")} ${pc.gray(thinkingTitle)} ${pc.gray("\xB7")} ${pc.gray(dur + "s")}`);
         }
         process.stdout.write(`   ${c(text)}`);
@@ -688,6 +693,8 @@ export class Agent {
     }
 
     let textContent = "";
+    let reasoningContent = "";
+    let firstReasoning = true;
     const toolCallMap = new Map<number, OpenAIToolCallAcc>();
     let finishReason: string | null = null;
     let oaiInputTokens = 0;
@@ -712,12 +719,31 @@ export class Agent {
         const delta = choice.delta as Record<string, unknown> | undefined;
         if (!delta) continue;
 
+        const reasoningDelta = delta.reasoning_content as string | undefined;
+        if (reasoningDelta) {
+          reasoningContent += reasoningDelta;
+          if (firstReasoning) {
+            firstReasoning = false;
+            spinner.stop();
+            if (firstText) firstText = false;
+            clearLine();
+            console.log(`   ${COL.orange("\u2823")} ${COL.orange("Reasoning:")} ${pc.gray(reasoningDelta.slice(0, 80).replace(/\n/g, " "))}`);
+          }
+        }
+
         if (delta.content) {
           const text = delta.content as string;
           textContent += text;
+          if (firstReasoning && firstText) {
+            spinner.stop();
+            firstText = false;
+          }
           if (firstText) {
             spinner.stop();
             firstText = false;
+            if (!firstReasoning) {
+              clearLine();
+            }
             process.stdout.write(`   ${c(text)}`);
           } else {
             process.stdout.write(text);
