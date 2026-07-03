@@ -368,6 +368,18 @@ function printReplHeader(): void {
   console.log();
 }
 
+let statusBarHeight = 5;
+
+function setScrollRegion(top: number, bottom: number): void {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(`\x1b[${top};${bottom}r`);
+}
+
+function moveTo(row: number, col: number): void {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(`\x1b[${row};${col}H`);
+}
+
 function printStatusBar(state: ReplState): void {
   const usage = state.agent.getTokenUsage();
   const ctxLen = state.config.contextLength;
@@ -414,11 +426,28 @@ function printStatusBar(state: ReplState): void {
   }
   const line3 = `  ${hintParts.join(" " + pc.gray("\u2502") + " ")}`;
 
-  console.log(divider());
-  console.log(line1);
-  console.log(line2);
-  console.log(line3);
-  console.log(divider());
+  if (!process.stdout.isTTY) {
+    console.log(divider());
+    console.log(line1);
+    console.log(line2);
+    console.log(line3);
+    console.log(divider());
+    return;
+  }
+  const height = process.stdout.rows ?? 24;
+  setScrollRegion(1, height - statusBarHeight);
+  for (let i = 0; i < statusBarHeight; i++) {
+    moveTo(height - statusBarHeight + 1 + i, 1);
+    process.stdout.write("\x1b[2K");
+  }
+  moveTo(height - statusBarHeight + 1, 1);
+  process.stdout.write(`${divider()}\n`);
+  process.stdout.write(`${line1}\n`);
+  process.stdout.write(`${line2}\n`);
+  process.stdout.write(`${line3}\n`);
+  process.stdout.write(`${divider()}\n`);
+  process.stdout.write("\x1b[1A");
+  moveTo(height - statusBarHeight, 1);
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
@@ -1959,7 +1988,18 @@ async function dispatchSlash(state: ReplState, command: string, args: string): P
 
 async function runRepl(state: ReplState): Promise<void> {
   printReplHeader();
+  printStatusBar(state);
   const workdir = process.cwd();
+
+  process.on("exit", () => {
+    if (process.stdout.isTTY) {
+      process.stdout.write("\x1b[r");
+      process.stdout.write("\x1b[?25h");
+    }
+  });
+  process.on("SIGWINCH", () => {
+    printStatusBar(state);
+  });
 
   let sigintHandler: (() => void) | null = null;
   const setupSigint = () => {
@@ -2000,7 +2040,6 @@ function nextMode(current: "chat" | "plan" | "exec"): "chat" | "plan" | "exec" {
 }
 
 while (true) {
-    printStatusBar(state);
     const tuiMode = state.agent.getTuiMode();
     const prefix = modePrefix(tuiMode, pColor(state.modelInfo.provider));
     let raw: string;
@@ -2144,10 +2183,8 @@ while (true) {
       if (runTuiMode === "plan") state.agent.setPlanMode(prevPlanMode);
       if (runTuiMode === "exec") (state.config as { autoConfirm: boolean }).autoConfirm = prevAutoConfirm;
     }
-    console.log();
     autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
-    
-    console.log();
+    printStatusBar(state);
   }
 }
 
