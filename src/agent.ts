@@ -13,6 +13,9 @@ import {
 import { buildFullSystemPrompt } from "./context";
 import { webSearch, previewFileWrite, previewFilePatch, printDiffPreview } from "./diff";
 import { detectProjectType } from "./config";
+import { getAgent } from "./agents";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   TOOL_DEFINITIONS,
   toolListFiles,
@@ -335,6 +338,7 @@ export class Agent {
   private planMode: boolean = false;
   private currentPlan: AgentPlan | null = null;
   private tuiMode: "chat" | "plan" | "exec" = "chat";
+  private activeAgent: string = "default";
 
   constructor(config: AgentConfig, confirmFn: ConfirmFn, askUserFn: AskUserFn) {
     this.config = config;
@@ -806,8 +810,26 @@ export class Agent {
       if (projectInfo.lintCmd) prompt += `\nLint: \`${projectInfo.lintCmd}\``;
       if (projectInfo.runCmd) prompt += `\nRun: \`${projectInfo.runCmd}\``;
     }
+    const memoryPath = join(this.config.workingDirectory, ".aura-memory.md");
+    if (existsSync(memoryPath)) {
+      try {
+        const memory = readFileSync(memoryPath, "utf-8");
+        if (memory.trim()) {
+          prompt += `\n\n## PROJECT MEMORY (persistent across sessions)\n${memory}`;
+        }
+      } catch { /* ignore */ }
+    }
+    if (this.activeAgent && this.activeAgent !== "default") {
+      const persona = getAgent(this.activeAgent);
+      if (persona) {
+        prompt = persona.systemPrompt + prompt;
+      }
+    }
     return prompt;
   }
+
+  setActiveAgent(agent: string): void { this.activeAgent = agent; }
+  getActiveAgent(): string { return this.activeAgent; }
 
   private async streamAnthropic(): Promise<RawMessage> {
     const c = providerColor(this.config.provider);
@@ -1021,6 +1043,18 @@ export class Agent {
 
   private async executeTool(block: ToolUseBlock): Promise<ToolExecutionResult> {
     const input = (block.input ?? {}) as Record<string, unknown>;
+    if (this.activeAgent && this.activeAgent !== "default") {
+      const persona = getAgent(this.activeAgent);
+      if (persona && persona.blockedTools.includes(block.name)) {
+        printToolError(block.name, input, `blocked by ${persona.label} agent`);
+        return {
+          toolUseId: block.id,
+          content: `[BLOCKED] Tool "${block.name}" is not available in ${persona.label} agent mode. Allowed tools: ${persona.allowedTools.join(", ")}`,
+          isError: true,
+          isShellFailure: false,
+        };
+      }
+    }
     try {
       switch (block.name) {
         case "list_files":

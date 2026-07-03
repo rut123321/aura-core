@@ -51,7 +51,10 @@ import { FileWatcher, type WatchEvent } from "./watcher";
 import { webSearch } from "./diff";
 import { addTodo, updateTodoStatus, removeTodo, clearTodos, printTodos } from "./todo";
 import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./tokenplan";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { promptWithAutocomplete } from "./autocomplete";
+import { startMCPServers, getMCPServers, stopMCPServers } from "./mcp";
+import { startLSP, getLSP, stopLSP } from "./lsp";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, watch } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -241,6 +244,7 @@ function printHelp(): void {
     ["/plan-approve, /pa", "Approve & execute plan"],
     ["/plan-cancel, /pc", "Discard plan"],
     ["/mode", "Show TUI mode (chat/plan/exec)"],
+    ["/agent", "Switch agent persona (reviewer/tester/docs/...)"],
   ]));
 
   lines.push(...helpSection("Sessions", pc.blue("\u25C6"), [
@@ -1522,6 +1526,77 @@ function handleModeSwitch(state: ReplState): void {
   console.log(`    ${pc.cyan("exec")} ${pc.gray("\u2014")} ${pc.gray("Skip confirmation prompts")}`);
 }
 
+async function handleAgentSwitch(state: ReplState): Promise<void> {
+  const { listAgents } = await import("./agents");
+  const agents = listAgents();
+  const current = state.agent.getActiveAgent();
+  console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("Current agent:")} ${pc.white(current)}\n`);
+  const selected = await p.select({
+    message: "Switch agent:",
+    options: agents.map(a => ({
+      value: a.name,
+      label: `${a.icon}  ${pc.bold(a.label)}`,
+      hint: a.description,
+    })),
+  });
+  if (p.isCancel(selected) || !selected) { console.log(`\n  ${pc.gray("cancelled")}\n`); return; }
+  state.agent.setActiveAgent(selected as string);
+  const agent = agents.find(a => a.name === selected);
+  console.log(`\n  ${agent?.icon ?? "\u2728"}  ${pc.bold(agent?.label ?? selected)} ${pc.gray(agent?.description ?? "")}\n`);
+  if (agent && agent.blockedTools.length > 0) {
+    console.log(`  ${pc.yellow("\u26A0")}  ${pc.gray("Blocked tools:")} ${pc.yellow(agent.blockedTools.join(", "))}`);
+    console.log();
+  }
+}
+
+function handleMCPStatus(): void {
+  const servers = getMCPServers();
+  if (servers.length === 0) {
+    console.log(`\n  ${pc.gray("No MCP servers running.")}`);
+    console.log(`  ${pc.gray("Add servers in .aurarc:")}`);
+    console.log(`  ${pc.cyan('"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }')}`);
+    console.log();
+    return;
+  }
+  console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("MCP Servers")} ${pc.gray(`(${servers.length})`)}`);
+  for (const s of servers) {
+    const tools = s.getTools();
+    console.log(`  ${pc.green("\u25CF")} ${pc.bold(s.config.name)} ${pc.gray(`${tools.length} tools`)}`);
+    for (const t of tools.slice(0, 5)) {
+      console.log(`    ${pc.gray("\u2502")} ${pc.cyan(t.name)} ${pc.gray("\u2014")} ${pc.gray(t.description.slice(0, 60))}`);
+    }
+    if (tools.length > 5) {
+      console.log(`    ${pc.gray(`... ${tools.length - 5} more`)}`);
+    }
+  }
+  console.log();
+}
+
+function handleLSPStatus(): void {
+  const lsp = getLSP();
+  if (!lsp || !lsp.isActive()) {
+    console.log(`\n  ${pc.gray("No LSP server running. Supported: typescript, python, go, rust (if installed)")}`);
+    console.log();
+    return;
+  }
+  console.log(`\n  ${pc.green("\u25CF")} ${pc.bold("LSP active")}`);
+  console.log();
+}
+
+async function handleLocaleSwitch(): Promise<void> {
+  const { setLocale, getLocale } = await import("./highlight");
+  const loc = await p.select({
+    message: "Language:",
+    options: [
+      { value: "en", label: "English" },
+      { value: "ru", label: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439 (Russian)" },
+    ],
+  });
+  if (p.isCancel(loc) || !loc) return;
+  setLocale(loc as "en" | "ru");
+  console.log(`\n  ${pc.cyan("\u25C6")} ${pc.gray("Language:")} ${pc.white(getLocale())}\n`);
+}
+
 async function handleTokenPlans(): Promise<void> {
   const envKey = process.env["MINIMAX_API_KEY"];
   printTokenPlans();
@@ -1769,6 +1844,10 @@ const COMMAND_CATEGORIES: Array<{ label: string; options: PickerOption[] }> = [
       { label: "/plan-show", hint: "Show plan", value: "/plan-show" },
       { label: "/plan-approve", hint: "Approve plan", value: "/plan-approve" },
       { label: "/mode", hint: "Show TUI mode", value: "/mode" },
+      { label: "/agent", hint: "Switch agent persona", value: "/agent" },
+      { label: "/mcp", hint: "MCP servers status", value: "/mcp" },
+      { label: "/lsp", hint: "LSP status", value: "/lsp" },
+      { label: "/lang", hint: "Switch language", value: "/lang" },
       { label: "/project", hint: "Show project info", value: "/project" },
       { label: "/plans", hint: "Show Token Plans", value: "/plans" },
       { label: "/token-plans", hint: "Show Token Plans", value: "/token-plans" },
@@ -1859,6 +1938,10 @@ async function dispatchSlash(state: ReplState, command: string, args: string): P
     case "/plan-approve": case "/pa": await handlePlanApprove(state); return true;
     case "/plan-cancel": case "/pc": handlePlanCancel(state); return true;
     case "/mode": handleModeSwitch(state); return true;
+    case "/agent": await handleAgentSwitch(state); return true;
+    case "/mcp": handleMCPStatus(); return true;
+    case "/lsp": handleLSPStatus(); return true;
+    case "/lang": await handleLocaleSwitch(); return true;
     case "/project": handleProjectInfo(state); return true;
     case "/token-plans":
     case "/plans":
@@ -1888,6 +1971,20 @@ async function runRepl(state: ReplState): Promise<void> {
   };
   setupSigint();
 
+  const aurarcPath = join(workdir, ".aurarc");
+  if (existsSync(aurarcPath)) {
+    try {
+      const watcher = watch(aurarcPath, { persistent: false }, () => {
+        console.log(`\n  ${pc.cyan("\u27F3")} ${pc.gray(".aurarc changed \u2014 reloading config")}`);
+        const newCfg = loadConfig(workdir);
+        if (newCfg) {
+          Object.assign(state.config, newCfg);
+        }
+      });
+      process.on("exit", () => watcher.close());
+    } catch { /* watch not supported on all FS */ }
+  }
+
   const MODES: Array<"chat" | "plan" | "exec"> = ["chat", "plan", "exec"];
 
 function modePrefix(mode: "chat" | "plan" | "exec", providerColor: (s: string) => string): string {
@@ -1907,12 +2004,13 @@ while (true) {
     const tuiMode = state.agent.getTuiMode();
     const prefix = modePrefix(tuiMode, pColor(state.modelInfo.provider));
     let raw: string;
-    const input = await p.text({
-      message: prefix,
+    const input = await promptWithAutocomplete({
+      prompt: prefix,
       placeholder: nextPlaceholder(),
+      workdir: state.config.workingDirectory,
     });
 
-    if (p.isCancel(input)) {
+    if (input === null) {
       autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
       clearScreen(); printBanner();
       console.log(pc.gray("  goodbye"));
@@ -2059,6 +2157,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const { setLocale, detectLocale } = await import("./highlight");
+  setLocale(detectLocale());
+
   const parsed = parseArgs(process.argv);
 
   if (parsed.showVersion) { printBanner(); process.exit(0); }
@@ -2068,6 +2169,14 @@ async function main(): Promise<void> {
   printBanner();
   const firstRun = !loadGlobalSettings().lastProvider && !loadConfig(workdir)?.provider;
   if (firstRun && !parsed.provider) printWelcome();
+
+  startMCPServers(workdir).then(servers => {
+    if (servers.length > 0) console.log(`  ${pc.cyan("\u25C6")} ${pc.gray(`MCP: ${servers.length} server${servers.length > 1 ? "s" : ""} started`)}`);
+  }).catch(() => {});
+  startLSP(workdir).then(lsp => {
+    if (lsp) console.log(`  ${pc.cyan("\u25C6")} ${pc.gray("LSP started")}`);
+  }).catch(() => {});
+  process.on("exit", () => { stopMCPServers(); stopLSP(); });
 
   const savedConfig = loadConfig(workdir);
   const globalSettings = loadGlobalSettings();
