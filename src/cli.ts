@@ -13,13 +13,12 @@ import {
 } from "./types";
 import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
 import {
-  C, box, contextBar, createTable,
+  C, box, createTable,
   sectionInline, pendingAction, divider,
   successLabel, errorLabel, greeting, sessionLine,
   reasonBadge as fmtReasonBadge,
-  auraBanner, welcomeScreen, modeBadge, statusBadge,
+  modeBadge, statusBadge,
   kvLine, hint,
-  type CapabilityItem,
 } from "./format";
 
 // @ts-ignore - intentional console.log override for Windows \r\n compat
@@ -54,11 +53,13 @@ import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./t
 import { promptWithAutocomplete } from "./autocomplete";
 import { startMCPServers, getMCPServers, stopMCPServers } from "./mcp";
 import { startLSP, getLSP, stopLSP } from "./lsp";
+import * as TUI from "./tui";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, watch } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const VERSION = "2.2.0";
+const sessionStartTime = Date.now();
 
 function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
@@ -153,21 +154,33 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printBanner(): void {
-  console.log(auraBanner(VERSION));
+  const lines = [
+    "    \u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588   \u2588\u2588\u2588  \u2588\u2588\u2588   \u2588\u2588\u2588   \u2588\u2588\u2588   \u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588",
+    "   \u2588\u2588     \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588   \u2588\u2588 ",
+    "   \u2588\u2588     \u2588\u2588\u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588   \u2588\u2588 ",
+    "   \u2588\u2588     \u2588\u2588 \u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588 \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588\u2588\u2588\u2588\u2588\u2588",
+    "    \u2588\u2588\u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588   \u2588\u2588 ",
+    "                                     \u2588\u2588  \u2588\u2588                  ",
+    "                                     \u2588\u2588\u2588\u2588                    ",
+  ];
+  const gradBanner = TUI.gradLines(lines, "fab2a4", "5d9bdb");
+  console.log(gradBanner);
+  console.log(`  ${TUI.gradText("autonomous AI coding agent", "sunset")}  ${pc.dim("v" + VERSION)}`);
+  console.log("");
 }
 
 function printWelcome(): void {
-  const caps: CapabilityItem[] = [
-    { icon: pc.cyan("\u2728"), label: "Multi-provider", desc: "13+ providers: Anthropic, OpenAI, Groq, DeepSeek, MiniMax" },
-    { icon: pc.green("\u26A1"), label: "Plan mode", desc: "Plan before execute, review diffs, approve steps" },
-    { icon: pc.magenta("\u25C6"), label: "Self-healing", desc: "Auto-fixes lint/typecheck after each edit" },
-    { icon: pc.yellow("\u2605"), label: "Smart context", desc: "Prunes old tool results, summarizes when full" },
-    { icon: pc.cyan("\u25CB"), label: "Streaming", desc: "Real-time token output, cancel anytime" },
-    { icon: pc.green("\u2713"), label: "Git-aware", desc: "Auto-branch, commit, PR with gh integration" },
-    { icon: pc.gray("\u25CB"), label: "Sessions", desc: "Save/load/auto-tag with git branch info" },
-    { icon: pc.cyan("$"), label: "Cost tracking", desc: "Sparklines, $/1M tokens, history" },
+  const caps: TUI.WelcomeItem[] = [
+    { icon: TUI.pill("13+", [86, 182, 194]), title: "Multi-provider", desc: "Anthropic, OpenAI, Groq, DeepSeek, MiniMax, custom" },
+    { icon: TUI.pill("PLAN", [147, 112, 219]), title: "Plan mode", desc: "Plan first, review, approve, then execute" },
+    { icon: TUI.pill("FIX", [127, 216, 143]), title: "Self-healing", desc: "Auto-runs lint/typecheck after each edit" },
+    { icon: TUI.pill("CTX", [245, 167, 66]), title: "Smart context", desc: "Prunes tool results, prompt caching" },
+    { icon: TUI.pill("STREAM", [92, 156, 245]), title: "Streaming", desc: "Real-time output, cancel anytime (Ctrl+C)" },
+    { icon: TUI.pill("GIT", [224, 108, 117]), title: "Git-aware", desc: "Auto-branch, commit, PR via gh" },
+    { icon: TUI.pill("LSP", [157, 124, 216]), title: "LSP + MCP", desc: "TypeScript/Python/Go/Rust servers, MCP clients" },
+    { icon: TUI.pill("AGENTS", [250, 178, 131]), title: "Custom agents", desc: "reviewer, tester, docs, refactorer" },
   ];
-  console.log(welcomeScreen(caps));
+  console.log(TUI.welcome(caps, VERSION));
 }
 
 function helpRow(cmd: string, desc: string, w = 18): string {
@@ -179,7 +192,7 @@ function helpSection(title: string, icon: string, items: Array<[string, string]>
   const header = `  ${icon}  ${pc.bold(pc.white(title.toUpperCase()))}`;
   out.push("");
   out.push(header);
-  out.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  out.push(`  ${TUI.divider("gradient", 60)}`);
   for (const [cmd, desc] of items) {
     out.push(helpRow(cmd, desc));
   }
@@ -188,10 +201,10 @@ function helpSection(title: string, icon: string, items: Array<[string, string]>
 
 function printHelp(): void {
   const lines: string[] = [];
-  const title = pc.cyan(pc.bold("AURA")) + pc.dim(" \u2014 ") + pc.gray("command reference");
+  const title = TUI.gradText("AURA", "aura") + pc.dim(" \u2014 ") + pc.gray("command reference");
   lines.push("");
   lines.push(`  ${title}`);
-  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  lines.push(`  ${TUI.divider("gradient", 60)}`);
   lines.push(`  ${pc.dim("Usage:")} ${pc.white("aura")} ${pc.gray("[options] [instruction]")}`);
   lines.push("");
   lines.push(`  ${pc.bold(pc.magenta("\u25CF"))}  ${pc.bold(pc.white("OPTIONS"))}`);
@@ -391,40 +404,59 @@ function printStatusBar(state: ReplState): void {
   const tuiMode = state.agent.getTuiMode();
   const planMode = state.agent.isPlanMode();
   const historyLen = state.agent.getHistoryLength();
+  const activeAgent = state.agent.getActiveAgent();
 
-  const leftParts: string[] = [
+  const projectName = state.config.workingDirectory.split(/[\\/]/).filter(Boolean).pop() ?? ".";
+  let gitBranch = "";
+  try {
+    const cp = require("node:child_process") as typeof import("node:child_process");
+    gitBranch = cp.execSync("git rev-parse --abbrev-ref HEAD", { cwd: state.config.workingDirectory, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch { /* not a git repo */ }
+  const uptime = TUI.uptime((Date.now() - sessionStartTime) / 1000);
+
+  const line1Left = [
     providerColor(C.bold(shortModel)),
-    C.gray(PROVIDERS[state.config.provider].label),
+    pc.dim("\u00B7"),
+    pc.gray(PROVIDERS[state.config.provider].label),
+    pc.dim("\u00B7"),
+    pc.white(projectName),
   ];
-  if (state.config.reasoningEffort !== "off") leftParts.push(fmtReasonBadge(state.config.reasoningEffort));
+  if (gitBranch) {
+    line1Left.push(pc.dim("\u00B7"));
+    line1Left.push(`\x1b[38;2;127;216;143m\u2387 ${gitBranch}\x1b[39m`);
+  }
+  if (state.config.reasoningEffort !== "off") line1Left.push(fmtReasonBadge(state.config.reasoningEffort));
+  const line1Right: string[] = [];
+  if (uptime) line1Right.push(pc.dim(`\u23F1 ${uptime}`));
+  if (historyLen > 0) line1Right.push(pc.dim(`${historyLen} msgs`));
 
-  const rightParts: string[] = [];
-  if (ctxLen && ctxLen > 0 && totalTokens > 0) rightParts.push(contextBar(totalTokens, ctxLen));
-  if (cost.total > 0) rightParts.push(statusBadge(`$${cost.total.toFixed(4)}`, "yellow"));
-  if (historyLen > 0) rightParts.push(statusBadge(`${historyLen}m`, "cyan"));
-
-  const leftStr = leftParts.join(" ");
-  const rightStr = rightParts.join(" ");
   const width = (process.stdout.columns ?? 80) - 4;
+  const leftStr = line1Left.join(" ");
+  const rightStr = line1Right.join(" ");
   const padLen = Math.max(1, width - leftStr.length - rightStr.length - 4);
   const line1 = `  ${leftStr}${" ".repeat(padLen)}${rightStr}`;
 
   const tags: string[] = [modeBadge(tuiMode)];
   if (planMode) tags.push(statusBadge("PLANNING", "magenta"));
   if (state.config.autoConfirm) tags.push(statusBadge("AUTO", "green"));
+  if (activeAgent !== "default") tags.push(TUI.pill(`\uD83E\uDD16 ${activeAgent}`, [157, 124, 216]));
+  const mcpCount = getMCPServers().length;
+  if (mcpCount > 0) tags.push(TUI.pill(`MCP ${mcpCount}`, [86, 182, 194]));
+  if (getLSP()?.isActive()) tags.push(TUI.pill("LSP", [250, 178, 131]));
   const line2 = `  ${tags.join(" ")}`;
 
-  const totalTokensLabel = ctxLen ? `${totalTokens.toLocaleString()} / ${ctxLen.toLocaleString()}` : totalTokens.toLocaleString();
-  const hintParts: string[] = [
-    C.dim(`tokens: ${totalTokensLabel}`),
-    C.dim(`in: ${usage.input.toLocaleString()}`),
-    C.dim(`out: ${usage.output.toLocaleString()}`),
-  ];
-  if (ctxLen && ctxLen > 0) {
-    const pct = Math.min(100, Math.round((totalTokens / ctxLen) * 100));
-    hintParts.push(C.dim(`ctx: ${pct}%`));
+  const line3Content: string[] = [];
+  if (ctxLen && ctxLen > 0 && totalTokens > 0) {
+    line3Content.push(TUI.tokenBar(usage.input, usage.output, ctxLen, Math.max(10, Math.min(30, width - 50))));
+  } else {
+    line3Content.push(TUI.tokenBar(usage.input, usage.output, Math.max(usage.input + usage.output, 1), 20));
   }
-  const line3 = `  ${hintParts.join(" " + pc.gray("\u2502") + " ")}`;
+  if (cost.total > 0) line3Content.push(TUI.pill(`$${cost.total.toFixed(4)}`, [245, 207, 102]));
+  const costHistory = state.agent.getCostHistory?.() ?? [];
+  if (costHistory.length >= 2) {
+    line3Content.push(pc.dim("trend:") + " " + TUI.costSparkline(costHistory.map(h => h.total), 16));
+  }
+  const line3 = `  ${line3Content.join(" " + pc.gray("\u2502") + " ")}`;
 
   if (!process.stdout.isTTY) {
     console.log(divider());
@@ -2027,11 +2059,11 @@ async function runRepl(state: ReplState): Promise<void> {
 
   const MODES: Array<"chat" | "plan" | "exec"> = ["chat", "plan", "exec"];
 
-function modePrefix(mode: "chat" | "plan" | "exec", providerColor: (s: string) => string): string {
-  const arrow = providerColor(pc.bold("\u276F"));
-  if (mode === "plan") return `\x1b[48;2;157;124;216m\x1b[38;2;30;30;30m  PLAN  \x1b[39m\x1b[49m ${arrow} `;
-  if (mode === "exec") return `\x1b[48;2;245;167;66m\x1b[38;2;30;30;30m  EXEC  \x1b[39m\x1b[49m ${arrow} `;
-  return `  ${arrow} `;
+function modePrefix(mode: "chat" | "plan" | "exec", _providerColor: (s: string) => string): string {
+  const arrow = `\x1b[38;2;250;178;131m\u276F\x1b[39m`;
+  if (mode === "plan") return `\x1b[48;2;157;124;216m\x1b[38;2;30;30;30m  \u2728 PLAN  \x1b[39m\x1b[49m ${arrow} `;
+  if (mode === "exec") return `\x1b[48;2;245;167;66m\x1b[38;2;30;30;30m  \u26A1 EXEC \x1b[39m\x1b[49m ${arrow} `;
+  return `\x1b[38;2;92;156;245m\u2728\x1b[39m ${arrow} `;
 }
 
 function nextMode(current: "chat" | "plan" | "exec"): "chat" | "plan" | "exec" {
