@@ -13,12 +13,9 @@ import {
 } from "./types";
 import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
 import {
-  C, box, createTable,
-  sectionInline, pendingAction, divider,
-  successLabel, errorLabel, greeting, sessionLine,
-  reasonBadge as fmtReasonBadge,
-  modeBadge, statusBadge,
-  kvLine, hint,
+  C, createTable,
+  sectionInline, pendingAction,
+  reasonBadge,
 } from "./format";
 
 // @ts-ignore - intentional console.log override for Windows \r\n compat
@@ -41,29 +38,24 @@ import type { GlobalSettings, SessionSummary } from "./session";
 
 import {
   addContextFile, dropContextFile, getContextFiles, clearContextFiles,
-  parseFileReferences, createInitFile, loadInitFile,
+  parseFileReferences, createInitFile,
 } from "./context";
-import { loadConfig, detectProjectType, formatProjectInfo, createAurarcTemplate } from "./config";
+import { loadConfig, detectProjectType, createAurarcTemplate } from "./config";
 import { runSubagent } from "./subagent";
 import { createPullRequest, isGhInstalled, generatePrBody } from "./pr";
 import { FileWatcher, type WatchEvent } from "./watcher";
 import { webSearch } from "./diff";
 import { addTodo, updateTodoStatus, removeTodo, clearTodos, printTodos } from "./todo";
-import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./tokenplan";
 import { promptWithAutocomplete } from "./autocomplete";
 import { startMCPServers, getMCPServers, stopMCPServers } from "./mcp";
 import { startLSP, getLSP, stopLSP } from "./lsp";
-import * as TUI from "./tui";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, watch } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { printBanner, printWelcome, printHelp, printReplHeader, printSessionInfo, printStatusBar, printStatus, printModelInfo, printModelTable, printProjectInfo, handleTokenPlans } from "./ui/display";
+import { clearScreen, pColor, pBadge, infoBox, fmtTokens, fmtCost, fmtDate, nextPlaceholder } from "./ui/terminal";
 
-const VERSION = "2.2.0";
-const sessionStartTime = Date.now();
 
-function clearScreen(): void {
-  process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
-}
 
 async function editorPrompt(initial: string): Promise<string | null> {
   const editor = process.env.EDITOR || process.env.VISUAL || "notepad";
@@ -78,41 +70,6 @@ async function editorPrompt(initial: string): Promise<string | null> {
   } catch {
     return initial;
   }
-}
-
-function pColor(provider: Provider): (s: string) => string {
-  return PROVIDERS[provider].color;
-}
-
-function pBadge(provider: Provider): string {
-  const c = PROVIDERS[provider].color;
-  return c(PROVIDERS[provider].label);
-}
-
-function infoBox(title: string, text: string, color: "cyan" | "green" | "yellow" | "red" | "magenta" | "blue" = "cyan"): string {
-  return box(title, text, color);
-}
-
-function reasonBadge(effort: ReasoningEffort): string {
-  return fmtReasonBadge(effort);
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-}
-
-function fmtCost(n: number): string {
-  if (n >= 1) return `$${n.toFixed(2)}`;
-  if (n >= 0.01) return `$${n.toFixed(3)}`;
-  if (n > 0) return `$${n.toFixed(4)}`;
-  return "$0";
-}
-
-function fmtDate(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleDateString() + " " + d.toLocaleTimeString().slice(0, 5);
 }
 
 interface ParsedArgs {
@@ -153,197 +110,6 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { instruction: instr.join(" ").trim(), autoConfirm, model, provider, reasoning, showHelp, showVersion, listModels };
 }
 
-function printBanner(): void {
-  const lines = [
-    "    \u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588   \u2588\u2588\u2588  \u2588\u2588\u2588   \u2588\u2588\u2588   \u2588\u2588\u2588   \u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588",
-    "   \u2588\u2588     \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588   \u2588\u2588 ",
-    "   \u2588\u2588     \u2588\u2588\u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588   \u2588\u2588 ",
-    "   \u2588\u2588     \u2588\u2588 \u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588 \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588\u2588\u2588\u2588\u2588\u2588",
-    "    \u2588\u2588\u2588\u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588  \u2588\u2588 \u2588\u2588   \u2588\u2588 ",
-    "                                     \u2588\u2588  \u2588\u2588                  ",
-    "                                     \u2588\u2588\u2588\u2588                    ",
-  ];
-  const gradBanner = TUI.gradLines(lines, "fab2a4", "5d9bdb");
-  console.log(gradBanner);
-  console.log(`  ${TUI.gradText("autonomous AI coding agent", "sunset")}  ${pc.dim("v" + VERSION)}`);
-  console.log("");
-}
-
-function printWelcome(): void {
-  const caps: TUI.WelcomeItem[] = [
-    { icon: TUI.pill("13+", [86, 182, 194]), title: "Multi-provider", desc: "Anthropic, OpenAI, Groq, DeepSeek, MiniMax, custom" },
-    { icon: TUI.pill("PLAN", [147, 112, 219]), title: "Plan mode", desc: "Plan first, review, approve, then execute" },
-    { icon: TUI.pill("FIX", [127, 216, 143]), title: "Self-healing", desc: "Auto-runs lint/typecheck after each edit" },
-    { icon: TUI.pill("CTX", [245, 167, 66]), title: "Smart context", desc: "Prunes tool results, prompt caching" },
-    { icon: TUI.pill("STREAM", [92, 156, 245]), title: "Streaming", desc: "Real-time output, cancel anytime (Ctrl+C)" },
-    { icon: TUI.pill("GIT", [224, 108, 117]), title: "Git-aware", desc: "Auto-branch, commit, PR via gh" },
-    { icon: TUI.pill("LSP", [157, 124, 216]), title: "LSP + MCP", desc: "TypeScript/Python/Go/Rust servers, MCP clients" },
-    { icon: TUI.pill("AGENTS", [250, 178, 131]), title: "Custom agents", desc: "reviewer, tester, docs, refactorer" },
-  ];
-  console.log(TUI.welcome(caps, VERSION));
-}
-
-function helpRow(cmd: string, desc: string, w = 18): string {
-  return `  ${pc.cyan(cmd.padEnd(w))} ${pc.dim("\u2502")} ${pc.gray(desc)}`;
-}
-
-function helpSection(title: string, icon: string, items: Array<[string, string]>): string[] {
-  const out: string[] = [];
-  const header = `  ${icon}  ${pc.bold(pc.white(title.toUpperCase()))}`;
-  out.push("");
-  out.push(header);
-  out.push(`  ${TUI.divider("gradient", 60)}`);
-  for (const [cmd, desc] of items) {
-    out.push(helpRow(cmd, desc));
-  }
-  return out;
-}
-
-function printHelp(): void {
-  const lines: string[] = [];
-  const title = TUI.gradText("AURA", "aura") + pc.dim(" \u2014 ") + pc.gray("command reference");
-  lines.push("");
-  lines.push(`  ${title}`);
-  lines.push(`  ${TUI.divider("gradient", 60)}`);
-  lines.push(`  ${pc.dim("Usage:")} ${pc.white("aura")} ${pc.gray("[options] [instruction]")}`);
-  lines.push("");
-  lines.push(`  ${pc.bold(pc.magenta("\u25CF"))}  ${pc.bold(pc.white("OPTIONS"))}`);
-  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
-  const opts: Array<[string, string]> = [
-    ["-p, --provider", `AI provider (${PROVIDER_LIST.map(p => PROVIDERS[p].label).join(", ")})`],
-    ["-m, --model", "Model ID"],
-    ["-r, --reasoning", "Reasoning: off \u00B7 low \u00B7 medium \u00B7 high \u00B7 max"],
-    ["-y, --yes", "Auto-confirm all actions"],
-    ["-l, --list-models", "List available models for provider"],
-    ["-h, --help", "Show this help"],
-    ["-v, --version", "Show version"],
-  ];
-  for (const [cmd, desc] of opts) lines.push(helpRow(cmd, desc));
-
-  lines.push(...helpSection("Git & PR", pc.green("\u2387"), [
-    ["/diff", "Show uncommitted changes"],
-    ["/commit", "AI commit message + commit"],
-    ["/undo [n]", "Revert last AI change(s)"],
-    ["/log", "Recent commits"],
-    ["/branch", "List/switch/create branches"],
-    ["/changes", "Changed files summary"],
-    ["/pr", "Create GitHub Pull Request"],
-  ]));
-
-  lines.push(...helpSection("Code Quality", pc.cyan("\u2728"), [
-    ["/review", "AI review of changes"],
-    ["/test", "Run tests (auto-detected)"],
-    ["/lint", "Run linter (auto-detected)"],
-    ["/explain <f>", "Explain code in a file"],
-    ["/refactor", "AI refactoring suggestions"],
-    ["/gen-test <f>", "Generate tests for a file"],
-    ["/doc <f>", "Generate documentation"],
-    ["/watch", "Auto-run tests on file changes"],
-  ]));
-
-  lines.push(...helpSection("Context & Memory", pc.magenta("\u25C6"), [
-    ["/add <f>", "Add file to persistent context"],
-    ["/drop <f>", "Remove file from context"],
-    ["/context", "List context files"],
-    ["/compact", "Compact conversation history"],
-    ["/init", "Create AURA.md project context"],
-    ["/memory", "Show/edit agent memory"],
-    ["/config", "Edit .aurarc config"],
-  ]));
-
-  lines.push(...helpSection("Plan Mode", pc.yellow("\u25B3"), [
-    ["/plan", "Toggle plan mode"],
-    ["/plan-show, /ps", "Show current plan"],
-    ["/plan-approve, /pa", "Approve & execute plan"],
-    ["/plan-cancel, /pc", "Discard plan"],
-    ["/mode", "Show TUI mode (chat/plan/exec)"],
-    ["/agent", "Switch agent persona (reviewer/tester/docs/...)"],
-  ]));
-
-  lines.push(...helpSection("Sessions", pc.blue("\u25C6"), [
-    ["/save [n]", "Save session"],
-    ["/load [n]", "Load session"],
-    ["/resume", "Pick a saved session"],
-    ["/sessions", "List saved sessions"],
-    ["/export", "Export to Markdown"],
-  ]));
-
-  lines.push(...helpSection("Provider & Model", pc.cyan("\u25CB"), [
-    ["/provider", "Switch AI provider"],
-    ["/model", "Change model"],
-    ["/reasoning", "Set reasoning effort"],
-    ["/cost", "Show session cost (with sparklines)"],
-  ]));
-
-  lines.push(...helpSection("Other", pc.gray("\u25CB"), [
-    ["/search", "Web search"],
-    ["/project", "Show detected project info"],
-    ["/plans", "Show Token Plans"],
-  ]));
-
-  lines.push("");
-  lines.push(`  ${pc.bold(pc.magenta("\u25CF"))}  ${pc.bold(pc.white("BUILT-IN SHORTCUTS"))}`);
-  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
-  const shortcuts: Array<[string, string]> = [
-    ["@filename", "Inline file reference"],
-    ["@general", "Spawn subagent for task"],
-    ["!<command>", "Run shell command directly"],
-    ["\\\\plan, \\\\p", "Toggle plan mode"],
-    ["\\\\mode, \\\\m", "Cycle TUI mode"],
-    ["model", "Show model info"],
-    ["status", "Show session status"],
-    ["clear", "Clear conversation"],
-    ["help", "Show this help"],
-    ["exit, :q", "Exit session"],
-  ];
-  for (const [cmd, desc] of shortcuts) lines.push(helpRow(cmd, desc));
-
-  lines.push("");
-  lines.push(`  ${pc.dim("Tip:")} ${pc.gray("Type")} ${pc.cyan("/")} ${pc.gray("at the prompt to open the command picker.")}`);
-  lines.push("");
-  console.log(lines.join("\n"));
-}
-
-function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEffort): void {
-  const c = pColor(model.provider);
-  console.log();
-  const line = sessionLine(c(model.label), PROVIDERS[model.provider].label, workdir, effort === "off" ? undefined : effort);
-  console.log(line);
-  const infoLines: string[] = [];
-  if (model.contextLength) infoLines.push(kvLine("context:", model.contextLength.toLocaleString() + " tokens"));
-  const initFile = loadInitFile(workdir);
-  if (initFile) infoLines.push(kvLine("init:", "AURA.md loaded"));
-  const aurarcPath = join(workdir, ".aurarc");
-  if (existsSync(aurarcPath)) infoLines.push(kvLine("config:", ".aurarc loaded"));
-  if (infoLines.length > 0) {
-    for (const l of infoLines) console.log(l);
-  } else {
-    console.log(`  ${hint("Tip: run /init to generate AURA.md + .aurarc")}`);
-  }
-  console.log();
-}
-
-const PLACEHOLDERS = [
-  "Fix a TODO in the codebase",
-  "What is the tech stack?",
-  "Fix broken tests",
-  "Add input validation to auth.ts",
-  "Explain the architecture",
-  "Refactor utils for readability",
-  "Implement a new feature",
-  "Review last 10 commits",
-  "Generate API docs",
-  "Optimize slow queries",
-];
-
-let placeholderIdx = Math.floor(Math.random() * PLACEHOLDERS.length);
-
-function nextPlaceholder(): string {
-  const p = PLACEHOLDERS[placeholderIdx];
-  placeholderIdx = (placeholderIdx + 1) % PLACEHOLDERS.length;
-  return p;
-}
-
 function formatMsgPreview(content: unknown, maxLen: number = 120): string {
   if (typeof content === "string") {
     return content.replace(/\n/g, " ").slice(0, maxLen);
@@ -372,114 +138,6 @@ function printPreviousConversation(conv: unknown[]): void {
   }
   console.log(`  ${pc.gray("─".repeat(40))}`);
   console.log();
-}
-
-function printReplHeader(): void {
-  console.log(greeting());
-  console.log();
-  console.log(hint("type your task, / for commands, ? for help, \\\\plan for plan mode"));
-  console.log();
-}
-
-let statusBarHeight = 5;
-
-function setScrollRegion(top: number, bottom: number): void {
-  if (!process.stdout.isTTY) return;
-  process.stdout.write(`\x1b[${top};${bottom}r`);
-}
-
-function moveTo(row: number, col: number): void {
-  if (!process.stdout.isTTY) return;
-  process.stdout.write(`\x1b[${row};${col}H`);
-}
-
-function printStatusBar(state: ReplState): void {
-  const usage = state.agent.getTokenUsage();
-  const ctxLen = state.config.contextLength;
-  const totalTokens = usage.total;
-  const cost = state.agent.getCost();
-  const shortModel = state.modelInfo.label;
-  const providerColor = pColor(state.modelInfo.provider);
-
-  const tuiMode = state.agent.getTuiMode();
-  const planMode = state.agent.isPlanMode();
-  const historyLen = state.agent.getHistoryLength();
-  const activeAgent = state.agent.getActiveAgent();
-
-  const projectName = state.config.workingDirectory.split(/[\\/]/).filter(Boolean).pop() ?? ".";
-  let gitBranch = "";
-  try {
-    const cp = require("node:child_process") as typeof import("node:child_process");
-    gitBranch = cp.execSync("git rev-parse --abbrev-ref HEAD", { cwd: state.config.workingDirectory, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch { /* not a git repo */ }
-  const uptime = TUI.uptime((Date.now() - sessionStartTime) / 1000);
-
-  const line1Left = [
-    providerColor(C.bold(shortModel)),
-    pc.dim("\u00B7"),
-    pc.gray(PROVIDERS[state.config.provider].label),
-    pc.dim("\u00B7"),
-    pc.white(projectName),
-  ];
-  if (gitBranch) {
-    line1Left.push(pc.dim("\u00B7"));
-    line1Left.push(`\x1b[38;2;127;216;143m\u2387 ${gitBranch}\x1b[39m`);
-  }
-  if (state.config.reasoningEffort !== "off") line1Left.push(fmtReasonBadge(state.config.reasoningEffort));
-  const line1Right: string[] = [];
-  if (uptime) line1Right.push(pc.dim(`\u23F1 ${uptime}`));
-  if (historyLen > 0) line1Right.push(pc.dim(`${historyLen} msgs`));
-
-  const width = (process.stdout.columns ?? 80) - 4;
-  const leftStr = line1Left.join(" ");
-  const rightStr = line1Right.join(" ");
-  const padLen = Math.max(1, width - leftStr.length - rightStr.length - 4);
-  const line1 = `  ${leftStr}${" ".repeat(padLen)}${rightStr}`;
-
-  const tags: string[] = [modeBadge(tuiMode)];
-  if (planMode) tags.push(statusBadge("PLANNING", "magenta"));
-  if (state.config.autoConfirm) tags.push(statusBadge("AUTO", "green"));
-  if (activeAgent !== "default") tags.push(TUI.pill(`\uD83E\uDD16 ${activeAgent}`, [157, 124, 216]));
-  const mcpCount = getMCPServers().length;
-  if (mcpCount > 0) tags.push(TUI.pill(`MCP ${mcpCount}`, [86, 182, 194]));
-  if (getLSP()?.isActive()) tags.push(TUI.pill("LSP", [250, 178, 131]));
-  const line2 = `  ${tags.join(" ")}`;
-
-  const line3Content: string[] = [];
-  if (ctxLen && ctxLen > 0 && totalTokens > 0) {
-    line3Content.push(TUI.tokenBar(usage.input, usage.output, ctxLen, Math.max(10, Math.min(30, width - 50))));
-  } else {
-    line3Content.push(TUI.tokenBar(usage.input, usage.output, Math.max(usage.input + usage.output, 1), 20));
-  }
-  if (cost.total > 0) line3Content.push(TUI.pill(`$${cost.total.toFixed(4)}`, [245, 207, 102]));
-  const costHistory = state.agent.getCostHistory?.() ?? [];
-  if (costHistory.length >= 2) {
-    line3Content.push(pc.dim("trend:") + " " + TUI.costSparkline(costHistory.map(h => h.total), 16));
-  }
-  const line3 = `  ${line3Content.join(" " + pc.gray("\u2502") + " ")}`;
-
-  if (!process.stdout.isTTY) {
-    console.log(divider());
-    console.log(line1);
-    console.log(line2);
-    console.log(line3);
-    console.log(divider());
-    return;
-  }
-  const height = process.stdout.rows ?? 24;
-  setScrollRegion(1, height - statusBarHeight);
-  for (let i = 0; i < statusBarHeight; i++) {
-    moveTo(height - statusBarHeight + 1 + i, 1);
-    process.stdout.write("\x1b[2K");
-  }
-  moveTo(height - statusBarHeight + 1, 1);
-  process.stdout.write(`${divider()}\n`);
-  process.stdout.write(`${line1}\n`);
-  process.stdout.write(`${line2}\n`);
-  process.stdout.write(`${line3}\n`);
-  process.stdout.write(`${divider()}\n`);
-  process.stdout.write("\x1b[1A");
-  moveTo(height - statusBarHeight, 1);
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
@@ -678,46 +336,6 @@ async function handleReasoningSwitch(state: ReplState): Promise<void> {
   newAgent.setConversation(state.agent.getConversation());
   state.agent = newAgent;
   console.log(`\n  ${pc.green("✓")} ${pc.green("Reasoning")} ${reasonBadge(effort)}\n`);
-}
-
-function printModelInfo(state: ReplState): void {
-  const model = state.modelInfo;
-  const c = pColor(model.provider);
-  const usage = state.agent.getTokenUsage();
-  const ctxLen = state.config.contextLength;
-  const t = createTable(["Property", "Value"], [16, 50]);
-  t.push([C.bold("Property"), C.bold("Value")]);
-  t.push(["Model", c(model.label)]);
-  t.push(["ID", C.gray(model.id)]);
-  if (ctxLen) t.push(["Context", fmtTokens(ctxLen) + " tokens"]);
-  t.push(["Tools", model.supportsTools ? successLabel("yes") : errorLabel("no")]);
-  t.push(["Vision", model.supportsVision ? successLabel("yes") : errorLabel("no")]);
-  t.push(["Reasoning", model.supportsReasoning ? successLabel("yes") : errorLabel("no") + " (" + reasonBadge(state.config.reasoningEffort) + ")"]);
-  if (usage.total > 0) t.push(["Tokens used", fmtTokens(usage.total)]);
-  console.log();
-  console.log(sectionInline("Model"));
-  console.log(t.toString());
-}
-
-function printStatus(state: ReplState): void {
-  const usage = state.agent.getTokenUsage();
-  const cost = state.agent.getCost();
-  const ctxFiles = getContextFiles();
-  const modifiedFiles = state.agent.getModifiedFiles();
-  const t = createTable(["Property", "Value"], [16, 60]);
-  t.push([C.bold("Property"), C.bold("Value")]);
-  t.push(["Model", pColor(state.modelInfo.provider)(state.modelInfo.label)]);
-  t.push(["Provider", C.gray(PROVIDERS[state.config.provider].label)]);
-  t.push(["Reasoning", reasonBadge(state.config.reasoningEffort)]);
-  t.push(["History", String(state.agent.getHistoryLength()) + " messages"]);
-  t.push(["Tokens", fmtTokens(usage.total)]);
-  if (cost.total > 0) t.push(["Cost", fmtCost(cost.total)]);
-  if (ctxFiles.length > 0) t.push(["Context files", ctxFiles.map(f => f.path).join(", ")]);
-  if (modifiedFiles.length > 0) t.push(["Modified", String(modifiedFiles.length) + " files"]);
-  t.push(["Directory", C.gray(process.cwd())]);
-  console.log();
-  console.log(sectionInline("Session"));
-  console.log(t.toString());
 }
 
 const SPARK_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -1426,15 +1044,6 @@ async function handleWatch(state: ReplState): Promise<void> {
   });
 }
 
-function handleProjectInfo(_state: ReplState): void {
-  const workdir = process.cwd();
-  const info = detectProjectType(workdir);
-  console.log();
-  console.log(`  ${pc.gray("\u2503")} ${pc.bold("Project")}`);
-  console.log(`  ${pc.gray("\u2503")} ${formatProjectInfo(info)}`.replace(/\n/g, `\n  ${pc.gray("\u2503")} `));
-  console.log();
-}
-
 async function handleConfig(_state: ReplState, workdir: string): Promise<void> {
   const aurarcPath = join(workdir, ".aurarc");
   if (!existsSync(aurarcPath)) {
@@ -1656,25 +1265,6 @@ async function handleLocaleSwitch(): Promise<void> {
   if (p.isCancel(loc) || !loc) return;
   setLocale(loc as "en" | "ru");
   console.log(`\n  ${pc.cyan("\u25C6")} ${pc.gray("Language:")} ${pc.white(getLocale())}\n`);
-}
-
-async function handleTokenPlans(): Promise<void> {
-  const envKey = process.env["MINIMAX_API_KEY"];
-  printTokenPlans();
-  if (!envKey) {
-    console.log(`  ${pc.yellow("\u26A0")}  ${pc.gray("MINIMAX_API_KEY not set")}`);
-    console.log();
-    console.log(`  ${pc.gray("Setup:")}`);
-    for (const step of getSetupInstructions()) {
-      console.log(`    ${pc.gray(step)}`);
-    }
-    console.log();
-  } else {
-    const check = await checkSubscriptionKey(envKey);
-    const color = check.valid ? pc.green : pc.yellow;
-    console.log(`  ${color("●")} ${pc.gray("API key:")} ${color(check.message)}`);
-    console.log();
-  }
 }
 
 function handleTodo(state: ReplState, args: string): void {
@@ -2003,7 +1593,7 @@ async function dispatchSlash(state: ReplState, command: string, args: string): P
     case "/mcp": handleMCPStatus(); return true;
     case "/lsp": handleLSPStatus(); return true;
     case "/lang": await handleLocaleSwitch(); return true;
-    case "/project": handleProjectInfo(state); return true;
+    case "/project": printProjectInfo(); return true;
     case "/token-plans":
     case "/plans":
       handleTokenPlans();
@@ -2403,34 +1993,6 @@ async function main(): Promise<void> {
     }
     await runRepl({ agent, modelInfo, config, confirmFn, askUserFn });
   }
-}
-
-function printModelTable(models: ModelInfo[]): void {
-  const t = new Table({
-    style: { head: ["cyan"], border: ["gray"] },
-    chars: { "top": "─", "top-mid": "┬", "top-left": "┌", "top-right": "┐",
-             "bottom": "─", "bottom-mid": "┴", "bottom-left": "└", "bottom-right": "┘",
-             "left": "│", "left-mid": "├", "mid": "─", "mid-mid": "┼",
-             "right": "│", "right-mid": "┤" },
-    colWidths: [48, 20, 6, 6, 6, 10],
-  });
-  t.push([pc.bold("ID"), pc.bold("Name"), pc.bold("T"), pc.bold("V"), pc.bold("R"), pc.bold("Context")]);
-  for (const m of models) {
-    const c = pColor(m.provider);
-    const tIcon = m.supportsTools ? pc.green("\u2713") : pc.dim("\u00B7");
-    const vIcon = m.supportsVision ? pc.green("\u2713") : pc.dim("\u00B7");
-    const rIcon = m.supportsReasoning ? pc.green("\u2713") : pc.dim("\u00B7");
-    const ctx = m.contextLength
-      ? (m.contextLength >= 1_000_000
-          ? (m.contextLength / 1_000_000).toFixed(0) + "M"
-          : Math.round(m.contextLength / 1000) + "K")
-      : pc.dim("\u2014");
-    const idD = m.id.length > 46 ? m.id.slice(0, 44) + pc.dim("\u2026") : m.id;
-    t.push([pc.dim(idD), c(m.label), tIcon, vIcon, rIcon, ctx]);
-  }
-  console.log();
-  console.log(sectionInline("Available Models"));
-  console.log(t.toString());
 }
 
 main().catch((e: unknown) => {
