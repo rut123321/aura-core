@@ -13,10 +13,13 @@ import {
 } from "./types";
 import type { AgentConfig, AskUserFn, ConfirmFn, ModelInfo, Provider, ReasoningEffort } from "./types";
 import {
-  C, box, statusLine, contextBar, createTable,
+  C, box, contextBar, createTable,
   sectionInline, pendingAction, divider,
   successLabel, errorLabel, greeting, sessionLine,
   reasonBadge as fmtReasonBadge,
+  auraBanner, welcomeScreen, modeBadge, statusBadge,
+  kvLine, hint,
+  type CapabilityItem,
 } from "./format";
 
 // @ts-ignore - intentional console.log override for Windows \r\n compat
@@ -41,20 +44,36 @@ import {
   addContextFile, dropContextFile, getContextFiles, clearContextFiles,
   parseFileReferences, createInitFile, loadInitFile,
 } from "./context";
-import { loadConfig, detectProjectType, formatProjectInfo } from "./config";
+import { loadConfig, detectProjectType, formatProjectInfo, createAurarcTemplate } from "./config";
 import { runSubagent } from "./subagent";
 import { createPullRequest, isGhInstalled, generatePrBody } from "./pr";
 import { FileWatcher, type WatchEvent } from "./watcher";
 import { webSearch } from "./diff";
 import { addTodo, updateTodoStatus, removeTodo, clearTodos, printTodos } from "./todo";
 import { printTokenPlans, checkSubscriptionKey, getSetupInstructions } from "./tokenplan";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const VERSION = "2.2.0";
 
 function clearScreen(): void {
   process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+}
+
+async function editorPrompt(initial: string): Promise<string | null> {
+  const editor = process.env.EDITOR || process.env.VISUAL || "notepad";
+  const tmp = join(tmpdir(), ".aura-edit.txt");
+  try {
+    writeFileSync(tmp, initial + "\n", "utf-8");
+    const cp = require("child_process");
+    cp.execSync(`"${editor}" "${tmp}"`, { stdio: "inherit" });
+    const content = readFileSync(tmp, "utf-8");
+    unlinkSync(tmp);
+    return content;
+  } catch {
+    return initial;
+  }
 }
 
 function pColor(provider: Provider): (s: string) => string {
@@ -131,101 +150,140 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printBanner(): void {
-  console.log(`  ${C.gray("\u2500").repeat(50)}`);
-  console.log(`  ${C.cyan(C.bold("AURA"))} ${C.magenta(C.bold("CORE"))}  ${C.dim("v"+VERSION)}`);
-  console.log(`  ${C.dim("autonomous AI coding agent")}`);
-  console.log(`  ${C.gray("\u2500").repeat(50)}`);
+  console.log(auraBanner(VERSION));
+}
+
+function printWelcome(): void {
+  const caps: CapabilityItem[] = [
+    { icon: pc.cyan("\u2728"), label: "Multi-provider", desc: "13+ providers: Anthropic, OpenAI, Groq, DeepSeek, MiniMax" },
+    { icon: pc.green("\u26A1"), label: "Plan mode", desc: "Plan before execute, review diffs, approve steps" },
+    { icon: pc.magenta("\u25C6"), label: "Self-healing", desc: "Auto-fixes lint/typecheck after each edit" },
+    { icon: pc.yellow("\u2605"), label: "Smart context", desc: "Prunes old tool results, summarizes when full" },
+    { icon: pc.cyan("\u25CB"), label: "Streaming", desc: "Real-time token output, cancel anytime" },
+    { icon: pc.green("\u2713"), label: "Git-aware", desc: "Auto-branch, commit, PR with gh integration" },
+    { icon: pc.gray("\u25CB"), label: "Sessions", desc: "Save/load/auto-tag with git branch info" },
+    { icon: pc.cyan("$"), label: "Cost tracking", desc: "Sparklines, $/1M tokens, history" },
+  ];
+  console.log(welcomeScreen(caps));
+}
+
+function helpRow(cmd: string, desc: string, w = 18): string {
+  return `  ${pc.cyan(cmd.padEnd(w))} ${pc.dim("\u2502")} ${pc.gray(desc)}`;
+}
+
+function helpSection(title: string, icon: string, items: Array<[string, string]>): string[] {
+  const out: string[] = [];
+  const header = `  ${icon}  ${pc.bold(pc.white(title.toUpperCase()))}`;
+  out.push("");
+  out.push(header);
+  out.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  for (const [cmd, desc] of items) {
+    out.push(helpRow(cmd, desc));
+  }
+  return out;
 }
 
 function printHelp(): void {
-  const g = pc.gray, c = pc.cyan, b = pc.bold;
-  const lines = [
-    "",
-    b(g("  ═══════════════════════════════════════════════")),
-    b(g("   USAGE")),
-    g("    aura") + g(" [options]") + g(" [instruction]"),
-    "",
-    b(g("  ═══════════════════════════════════════════════")),
-    b(g("   OPTIONS")),
-    g("    -p, --provider") + c("    AI provider") + g("  (") + g(PROVIDER_LIST.map(p => PROVIDERS[p].label).join(" · ")) + g(")"),
-    g("    -m, --model") + c("       Model ID"),
-    g("    -r, --reasoning") + c("   Reasoning:") + g(" off · low · medium · high · max"),
-    g("    -y, --yes") + c("         Auto-confirm all actions"),
-    g("    -l, --list-models") + c("  List available models"),
-    g("    -h, --help") + c("        Show this help"),
-    g("    -v, --version") + c("     Show version"),
-    "",
-    b(g("  ═══════════════════════════════════════════════")),
-    b(g("   / COMMANDS")),
-    "",
-    b(c("   Git & PR")),
-    g("    /diff       ") + g("Show uncommitted changes"),
-    g("    /commit     ") + g("AI commit message + commit"),
-    g("    /undo [n]   ") + g("Revert last AI change(s)"),
-    g("    /log        ") + g("Recent commits"),
-    g("    /branch     ") + g("List/switch/create branches"),
-    g("    /changes    ") + g("Changed files summary"),
-    g("    /pr         ") + g("Create GitHub Pull Request"),
-    "",
-    b(c("   Code Quality")),
-    g("    /review     ") + g("AI review of changes"),
-    g("    /test       ") + g("Run tests (auto-detected)"),
-    g("    /lint       ") + g("Run linter (auto-detected)"),
-    g("    /explain    ") + g("Explain code in a file"),
-    g("    /refactor   ") + g("AI refactoring suggestions"),
-    g("    /gen-test   ") + g("Generate tests for a file"),
-    g("    /doc        ") + g("Generate documentation"),
-    g("    /watch      ") + g("Auto-run tests on file changes"),
-    "",
-    b(c("   Context & Memory")),
-    g("    /add  <f>   ") + g("Add file to persistent context"),
-    g("    /drop <f>   ") + g("Remove file from context"),
-    g("    /context    ") + g("List context files"),
-    g("    /compact    ") + g("Compact conversation history"),
-    g("    /init       ") + g("Create AURA.md project context"),
-    g("    /memory     ") + g("Show/edit agent memory"),
-    "",
-    b(c("   Sessions")),
-    g("    /save  [n]  ") + g("Save session"),
-    g("    /load  [n]  ") + g("Load session"),
-    g("    /resume     ") + g("Pick a saved session"),
-    g("    /sessions   ") + g("List saved sessions"),
-    g("    /export     ") + g("Export to Markdown"),
-    "",
-    b(c("   Provider & Model")),
-    g("    /provider   ") + g("Switch AI provider"),
-    g("    /model      ") + g("Change model"),
-    g("    /reasoning  ") + g("Set reasoning effort"),
-    g("    /cost       ") + g("Show session cost"),
-    "",
-    b(c("   Todo")),
-    g("    /todo add  ") + g("<text>  Add todo item"),
-    g("    /todo done ") + g("<id>    Mark complete"),
-    g("    /todo rm   ") + g("<id>    Remove todo"),
-    g("    /todo list ") + g("List todos"),
-    g("    /todo clear") + g("Clear all todos"),
-    "",
-    b(c("   Other")),
-    g("    /search    ") + g("Web search"),
-    g("    /project   ") + g("Show detected project info"),
-    g("    /plans     ") + g("Show Token Plans"),
-    g("    /token-plans") + g("Show Token Plans"),
-    "",
-    b(g("  ═══════════════════════════════════════════════")),
-    b(c("   BUILT-IN SHORTCUTS")),
-    g("    @filename   ") + g("Inline file reference"),
-    g("    @general    ") + g("Spawn subagent for task"),
-    g("    !<command>  ") + g("Run shell command directly"),
-    g("    model       ") + g("Show model info"),
-    g("    status      ") + g("Show session status"),
-    g("    clear       ") + g("Clear conversation"),
-    g("    help        ") + g("Show this help"),
-    g("    exit        ") + g("Exit session"),
-    "",
-    g("  ") + g("Type") + c(" /") + g(" at the prompt to open the command picker."),
-    "",
-
+  const lines: string[] = [];
+  const title = pc.cyan(pc.bold("AURA")) + pc.dim(" \u2014 ") + pc.gray("command reference");
+  lines.push("");
+  lines.push(`  ${title}`);
+  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  lines.push(`  ${pc.dim("Usage:")} ${pc.white("aura")} ${pc.gray("[options] [instruction]")}`);
+  lines.push("");
+  lines.push(`  ${pc.bold(pc.magenta("\u25CF"))}  ${pc.bold(pc.white("OPTIONS"))}`);
+  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  const opts: Array<[string, string]> = [
+    ["-p, --provider", `AI provider (${PROVIDER_LIST.map(p => PROVIDERS[p].label).join(", ")})`],
+    ["-m, --model", "Model ID"],
+    ["-r, --reasoning", "Reasoning: off \u00B7 low \u00B7 medium \u00B7 high \u00B7 max"],
+    ["-y, --yes", "Auto-confirm all actions"],
+    ["-l, --list-models", "List available models for provider"],
+    ["-h, --help", "Show this help"],
+    ["-v, --version", "Show version"],
   ];
+  for (const [cmd, desc] of opts) lines.push(helpRow(cmd, desc));
+
+  lines.push(...helpSection("Git & PR", pc.green("\u2387"), [
+    ["/diff", "Show uncommitted changes"],
+    ["/commit", "AI commit message + commit"],
+    ["/undo [n]", "Revert last AI change(s)"],
+    ["/log", "Recent commits"],
+    ["/branch", "List/switch/create branches"],
+    ["/changes", "Changed files summary"],
+    ["/pr", "Create GitHub Pull Request"],
+  ]));
+
+  lines.push(...helpSection("Code Quality", pc.cyan("\u2728"), [
+    ["/review", "AI review of changes"],
+    ["/test", "Run tests (auto-detected)"],
+    ["/lint", "Run linter (auto-detected)"],
+    ["/explain <f>", "Explain code in a file"],
+    ["/refactor", "AI refactoring suggestions"],
+    ["/gen-test <f>", "Generate tests for a file"],
+    ["/doc <f>", "Generate documentation"],
+    ["/watch", "Auto-run tests on file changes"],
+  ]));
+
+  lines.push(...helpSection("Context & Memory", pc.magenta("\u25C6"), [
+    ["/add <f>", "Add file to persistent context"],
+    ["/drop <f>", "Remove file from context"],
+    ["/context", "List context files"],
+    ["/compact", "Compact conversation history"],
+    ["/init", "Create AURA.md project context"],
+    ["/memory", "Show/edit agent memory"],
+    ["/config", "Edit .aurarc config"],
+  ]));
+
+  lines.push(...helpSection("Plan Mode", pc.yellow("\u25B3"), [
+    ["/plan", "Toggle plan mode"],
+    ["/plan-show, /ps", "Show current plan"],
+    ["/plan-approve, /pa", "Approve & execute plan"],
+    ["/plan-cancel, /pc", "Discard plan"],
+    ["/mode", "Show TUI mode (chat/plan/exec)"],
+  ]));
+
+  lines.push(...helpSection("Sessions", pc.blue("\u25C6"), [
+    ["/save [n]", "Save session"],
+    ["/load [n]", "Load session"],
+    ["/resume", "Pick a saved session"],
+    ["/sessions", "List saved sessions"],
+    ["/export", "Export to Markdown"],
+  ]));
+
+  lines.push(...helpSection("Provider & Model", pc.cyan("\u25CB"), [
+    ["/provider", "Switch AI provider"],
+    ["/model", "Change model"],
+    ["/reasoning", "Set reasoning effort"],
+    ["/cost", "Show session cost (with sparklines)"],
+  ]));
+
+  lines.push(...helpSection("Other", pc.gray("\u25CB"), [
+    ["/search", "Web search"],
+    ["/project", "Show detected project info"],
+    ["/plans", "Show Token Plans"],
+  ]));
+
+  lines.push("");
+  lines.push(`  ${pc.bold(pc.magenta("\u25CF"))}  ${pc.bold(pc.white("BUILT-IN SHORTCUTS"))}`);
+  lines.push(`  ${pc.gray("\u2500".repeat(60))}`);
+  const shortcuts: Array<[string, string]> = [
+    ["@filename", "Inline file reference"],
+    ["@general", "Spawn subagent for task"],
+    ["!<command>", "Run shell command directly"],
+    ["\\\\plan, \\\\p", "Toggle plan mode"],
+    ["\\\\mode, \\\\m", "Cycle TUI mode"],
+    ["model", "Show model info"],
+    ["status", "Show session status"],
+    ["clear", "Clear conversation"],
+    ["help", "Show this help"],
+    ["exit, :q", "Exit session"],
+  ];
+  for (const [cmd, desc] of shortcuts) lines.push(helpRow(cmd, desc));
+
+  lines.push("");
+  lines.push(`  ${pc.dim("Tip:")} ${pc.gray("Type")} ${pc.cyan("/")} ${pc.gray("at the prompt to open the command picker.")}`);
+  lines.push("");
   console.log(lines.join("\n"));
 }
 
@@ -234,12 +292,16 @@ function printSessionInfo(workdir: string, model: ModelInfo, effort: ReasoningEf
   console.log();
   const line = sessionLine(c(model.label), PROVIDERS[model.provider].label, workdir, effort === "off" ? undefined : effort);
   console.log(line);
-  if (model.contextLength) {
-    console.log(`  ${C.dim("context:")} ${C.white(model.contextLength.toLocaleString() + " tokens")}`);
-  }
+  const infoLines: string[] = [];
+  if (model.contextLength) infoLines.push(kvLine("context:", model.contextLength.toLocaleString() + " tokens"));
   const initFile = loadInitFile(workdir);
-  if (initFile) {
-    console.log(`  ${C.dim("init:")} ${C.green("AURA.md loaded")}`);
+  if (initFile) infoLines.push(kvLine("init:", "AURA.md loaded"));
+  const aurarcPath = join(workdir, ".aurarc");
+  if (existsSync(aurarcPath)) infoLines.push(kvLine("config:", ".aurarc loaded"));
+  if (infoLines.length > 0) {
+    for (const l of infoLines) console.log(l);
+  } else {
+    console.log(`  ${hint("Tip: run /init to generate AURA.md + .aurarc")}`);
   }
   console.log();
 }
@@ -298,6 +360,8 @@ function printPreviousConversation(conv: unknown[]): void {
 function printReplHeader(): void {
   console.log(greeting());
   console.log();
+  console.log(hint("type your task, / for commands, ? for help, \\\\plan for plan mode"));
+  console.log();
 }
 
 function printStatusBar(state: ReplState): void {
@@ -308,30 +372,49 @@ function printStatusBar(state: ReplState): void {
   const shortModel = state.modelInfo.label;
   const providerColor = pColor(state.modelInfo.provider);
 
-  const parts: string[] = [
+  const tuiMode = state.agent.getTuiMode();
+  const planMode = state.agent.isPlanMode();
+  const historyLen = state.agent.getHistoryLength();
+
+  const leftParts: string[] = [
     providerColor(C.bold(shortModel)),
     C.gray(PROVIDERS[state.config.provider].label),
   ];
+  if (state.config.reasoningEffort !== "off") leftParts.push(fmtReasonBadge(state.config.reasoningEffort));
 
-  if (state.config.reasoningEffort !== "off") {
-    parts.push(reasonBadge(state.config.reasoningEffort));
-  }
+  const rightParts: string[] = [];
+  if (ctxLen && ctxLen > 0 && totalTokens > 0) rightParts.push(contextBar(totalTokens, ctxLen));
+  if (cost.total > 0) rightParts.push(statusBadge(`$${cost.total.toFixed(4)}`, "yellow"));
+  if (historyLen > 0) rightParts.push(statusBadge(`${historyLen}m`, "cyan"));
 
-  if (ctxLen && ctxLen > 0 && totalTokens > 0) {
-    parts.push(contextBar(totalTokens, ctxLen));
-  }
+  const leftStr = leftParts.join(" ");
+  const rightStr = rightParts.join(" ");
+  const width = (process.stdout.columns ?? 80) - 4;
+  const padLen = Math.max(1, width - leftStr.length - rightStr.length - 4);
+  const line1 = `  ${leftStr}${" ".repeat(padLen)}${rightStr}`;
 
-  if (cost.total > 0) {
-    parts.push(C.gray(fmtCost(cost.total)));
-  }
+  const tags: string[] = [modeBadge(tuiMode)];
+  if (planMode) tags.push(statusBadge("PLANNING", "magenta"));
+  if (state.config.autoConfirm) tags.push(statusBadge("AUTO", "green"));
+  const line2 = `  ${tags.join(" ")}`;
 
-  const historyLen = state.agent.getHistoryLength();
-  if (historyLen > 0) {
-    parts.push(C.gray(`${historyLen} msgs`));
+  const totalTokensLabel = ctxLen ? `${totalTokens.toLocaleString()} / ${ctxLen.toLocaleString()}` : totalTokens.toLocaleString();
+  const hintParts: string[] = [
+    C.dim(`tokens: ${totalTokensLabel}`),
+    C.dim(`in: ${usage.input.toLocaleString()}`),
+    C.dim(`out: ${usage.output.toLocaleString()}`),
+  ];
+  if (ctxLen && ctxLen > 0) {
+    const pct = Math.min(100, Math.round((totalTokens / ctxLen) * 100));
+    hintParts.push(C.dim(`ctx: ${pct}%`));
   }
+  const line3 = `  ${hintParts.join(" " + pc.gray("\u2502") + " ")}`;
 
   console.log(divider());
-  console.log(statusLine(parts));
+  console.log(line1);
+  console.log(line2);
+  console.log(line3);
+  console.log(divider());
 }
 
 function createConfirmFn(autoConfirm: boolean): ConfirmFn {
@@ -572,6 +655,19 @@ function printStatus(state: ReplState): void {
   console.log(t.toString());
 }
 
+const SPARK_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+function sparkline(values: number[], width = 10): string {
+  if (values.length === 0) return "";
+  const max = Math.max(...values);
+  if (max === 0) return SPARK_BLOCKS[0].repeat(width);
+  const bucket: number[] = [];
+  for (let i = 0; i < width; i++) {
+    const idx = Math.floor((i / width) * values.length);
+    bucket.push(values[Math.min(idx, values.length - 1)]);
+  }
+  return bucket.map(v => SPARK_BLOCKS[Math.min(7, Math.floor((v / max) * 7))]).join("");
+}
+
 function printCost(state: ReplState): void {
   const cost = state.agent.getCost();
   const usage = state.agent.getTokenUsage();
@@ -589,6 +685,14 @@ function printCost(state: ReplState): void {
   console.log();
   console.log(sectionInline("Cost"));
   console.log(t.toString());
+  const ratio = usage.total > 0 ? (cost.total / usage.total * 1_000_000) : 0;
+  const spark = sparkline([usage.input, usage.output, Math.max(1, Math.floor(usage.total * 0.1))], 8);
+  console.log(`  ${C.dim("in/out ratio:")} ${C.white(`1:${usage.output > 0 ? (usage.input / usage.output).toFixed(1) : "?"}`)}  ${C.dim("per 1M tok:")} ${C.white(`$${ratio.toFixed(2)}`)}  ${C.dim("trend:")} ${pc.cyan(spark)}`);
+  const history = state.agent.getCostHistory?.() ?? [];
+  if (history.length >= 2) {
+    const sparkCost = sparkline(history.map(h => h.total), 16);
+    console.log(`  ${C.dim("cost history:")} ${pc.green(sparkCost)}  ${C.dim("avg:")} ${C.white("$" + fmtCost(history.reduce((a, b) => a + b.total, 0) / history.length))}`);
+  }
 }
 
 async function handleDiff(state: ReplState): Promise<void> {
@@ -726,6 +830,48 @@ async function handleCommit(state: ReplState): Promise<void> {
   const result = await gitCommit(message, workdir);
   if (result.success) {
     console.log(`\n  ${pc.green("\u2713")} ${pc.gray("committed:")} ${pc.white(message)}`);
+    // auto-update MEMORY.md
+    const memoryPath = join(workdir, "MEMORY.md");
+    const now = new Date().toISOString().slice(0, 10);
+    const entry = `\n## ${now} — ${message}\n\nFiles: ${changes.files.map(f => f.file).join(", ")}\n`;
+    try {
+      if (existsSync(memoryPath)) {
+        const existing = readFileSync(memoryPath, "utf-8");
+        writeFileSync(memoryPath, existing + entry, "utf-8");
+      } else {
+        writeFileSync(memoryPath, `# MEMORY\n\nAura-agent session memory.\n${entry}`, "utf-8");
+      }
+      console.log(`  ${pc.gray("MEMORY.md")} ${pc.green("updated")}`);
+    } catch {
+      console.log(`  ${pc.gray("MEMORY.md")} ${pc.yellow("failed")}`);
+    }
+    // auto-branch + auto-PR
+    try {
+      const branchInfo = await import("./git");
+      const current = await branchInfo.gitCurrentBranch(workdir);
+      const isMain = !current || ["main", "master", "develop"].includes(current);
+      if (isMain && changes.files.length > 0) {
+        const createBranch = await p.confirm({ message: "Create feature branch and push?" });
+        if (!p.isCancel(createBranch) && createBranch) {
+          const slug = message.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+          const newBranch = `feat/${slug}`;
+          const branchResult = await branchInfo.gitCreateBranch(newBranch, workdir);
+          if (branchResult.success) {
+            console.log(`  ${pc.green("✓")} ${pc.gray("branch:")} ${pc.white(newBranch)}`);
+            const createPR = await p.confirm({ message: "Create pull request via gh?" });
+            if (!p.isCancel(createPR) && createPR) {
+              const body = await generatePrBody(workdir);
+              const pr = await createPullRequest(workdir, message, body);
+              if (pr.success) {
+                console.log(`  ${pc.green("✓")} ${pc.gray("PR:")} ${pc.cyan(pr.url ?? "created")}`);
+              } else {
+                console.log(`  ${pc.yellow("⚠")} ${pc.gray("PR creation failed:")} ${pc.yellow(pr.message)}`);
+              }
+            }
+          }
+        }
+      }
+    } catch { /* PR flow is best-effort */ }
   } else {
     console.log(`\n  ${pc.red("\u2717")} ${pc.red(result.message)}`);
   }
@@ -899,10 +1045,22 @@ async function handleCompact(state: ReplState): Promise<void> {
 }
 
 function handleInit(state: ReplState): void {
-  const result = createInitFile(state.config.workingDirectory);
-  console.log(`\n  ${result.success ? pc.green("✓") : pc.yellow("⚠")}  ${result.success ? pc.green(result.message) : pc.yellow(result.message)}`);
-  if (result.success) {
+  const wd = state.config.workingDirectory;
+  const auraResult = createInitFile(wd);
+  console.log(`\n  ${auraResult.success ? pc.green("✓") : pc.yellow("⚠")}  ${auraResult.success ? pc.green(auraResult.message) : pc.yellow(auraResult.message)}`);
+  if (auraResult.success) {
     console.log(`  ${pc.gray("Edit")} ${pc.white("AURA.md")} ${pc.gray("to add project context for the AI agent.")}`);
+  }
+  const aurarcPath = join(wd, ".aurarc");
+  if (!existsSync(aurarcPath)) {
+    const detected = detectProjectType(wd);
+    const template = createAurarcTemplate(wd, detected);
+    try {
+      writeFileSync(aurarcPath, template, "utf-8");
+      console.log(`  ${pc.green("✓")}  ${pc.white(".aurarc")} ${pc.gray("created")}`);
+    } catch {
+      console.log(`  ${pc.yellow("⚠")}  ${pc.gray("Failed to create .aurarc")}`);
+    }
   }
   console.log();
 }
@@ -1212,6 +1370,158 @@ function handleProjectInfo(_state: ReplState): void {
   console.log();
 }
 
+async function handleConfig(_state: ReplState, workdir: string): Promise<void> {
+  const aurarcPath = join(workdir, ".aurarc");
+  if (!existsSync(aurarcPath)) {
+    const detected = detectProjectType(workdir);
+    const template = createAurarcTemplate(workdir, detected);
+    try {
+      writeFileSync(aurarcPath, template, "utf-8");
+      console.log(`\n  ${pc.green("✓")}  ${pc.white(".aurarc")} ${pc.gray("created with template")}`);
+    } catch {
+      console.log(`\n  ${pc.red("✗")}  ${pc.gray("Failed to create .aurarc")}`);
+    }
+    console.log();
+    return;
+  }
+  const cfg = loadConfig(workdir);
+  const action = await p.select({
+    message: ".aurarc config:",
+    options: [
+      { value: "edit", label: "Open in editor" },
+      { value: "provider", label: `Set provider (${cfg?.provider ?? "not set"})` },
+      { value: "model", label: `Set model (${cfg?.model ?? "not set"})` },
+      { value: "reasoning", label: `Set reasoning effort (${cfg?.reasoningEffort ?? "off"})` },
+      { value: "auto", label: `Toggle auto-confirm (${cfg?.autoConfirm ? "on" : "off"})` },
+      { value: "instructions", label: "Edit instructions" },
+      { value: "view", label: "View current config" },
+    ],
+  });
+  if (p.isCancel(action) || !action) { console.log(`\n  ${pc.gray("cancelled")}\n`); return; }
+  switch (action) {
+    case "edit": {
+      const content = await editorPrompt(readFileSync(aurarcPath, "utf-8"));
+      if (content !== null) {
+        writeFileSync(aurarcPath, content, "utf-8");
+        console.log(`\n  ${pc.green("✓")} ${pc.gray("saved")}\n`);
+      }
+      break;
+    }
+    case "provider": {
+      const pv = await p.select({ message: "Provider:", options: PROVIDER_LIST.map(p => ({ value: p, label: p })) });
+      if (!p.isCancel(pv) && pv) {
+        const content = readFileSync(aurarcPath, "utf-8");
+        writeFileSync(aurarcPath, content.replace(/"provider":\s*[^,\n]+/, `"provider": "${pv}"`), "utf-8");
+        console.log(`\n  ${pc.green("✓")} ${pc.gray("provider →")} ${pc.white(pv as string)}\n`);
+      }
+      break;
+    }
+    case "model": {
+      const md = await p.text({ message: "Model name:", placeholder: cfg?.model ?? "claude-sonnet-4-20250514" });
+      if (!p.isCancel(md) && (md as string).trim()) {
+        const content = readFileSync(aurarcPath, "utf-8");
+        writeFileSync(aurarcPath, content.replace(/"model":\s*[^,\n]+/, `"model": "${(md as string).trim()}"`), "utf-8");
+        console.log(`\n  ${pc.green("✓")} ${pc.gray("model →")} ${pc.white((md as string).trim())}\n`);
+      }
+      break;
+    }
+    case "reasoning": {
+      const re = await p.select({ message: "Reasoning effort:", options: Object.entries(REASONING_LABELS).map(([k, v]) => ({ value: k, label: v })) });
+      if (!p.isCancel(re) && re) {
+        const reasoningStr = re as string;
+        const content = readFileSync(aurarcPath, "utf-8");
+        writeFileSync(aurarcPath, content.replace(/"reasoningEffort":\s*"[^"]*"/, `"reasoningEffort": "${reasoningStr}"`), "utf-8");
+        console.log(`\n  ${pc.green("✓")} ${pc.gray("reasoning →")} ${pc.white(reasoningStr)}\n`);
+      }
+      break;
+    }
+    case "auto": {
+      const content = readFileSync(aurarcPath, "utf-8");
+      const current = cfg?.autoConfirm ?? false;
+      writeFileSync(aurarcPath, content.replace(/"autoConfirm":\s*(true|false)/, `"autoConfirm": ${!current}`), "utf-8");
+      console.log(`\n  ${pc.green("✓")} ${pc.gray("auto-confirm →")} ${pc.white(String(!current))}\n`);
+      break;
+    }
+    case "instructions": {
+      const inst = await editorPrompt(cfg?.instructions ?? "# Custom instructions for the agent\n");
+      if (inst !== null) {
+        const content = readFileSync(aurarcPath, "utf-8");
+        const escaped = JSON.stringify(inst);
+        writeFileSync(aurarcPath, content.replace(/"instructions":\s*"[^"]*"/, `"instructions": ${escaped}`), "utf-8");
+        console.log(`\n  ${pc.green("✓")} ${pc.gray("instructions updated")}\n`);
+      }
+      break;
+    }
+    case "view": {
+      const content = readFileSync(aurarcPath, "utf-8");
+      console.log(`\n  ${pc.gray(".aurarc")}`);
+      for (const line of content.split("\n")) {
+        console.log(`  ${pc.gray(line)}`);
+      }
+      console.log();
+      break;
+    }
+  }
+}
+
+function handlePlanToggle(state: ReplState): void {
+  const current = state.agent.isPlanMode();
+  state.agent.setPlanMode(!current);
+  console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("PLAN MODE")} ${pc.gray(!current ? "enabled" : "disabled")}`);
+  if (!current) {
+    console.log(`  ${pc.gray("Mutating tools (write_file, patch_file, execute_shell) are BLOCKED.")}`);
+    console.log(`  ${pc.gray("The agent will produce a structured plan instead. Review with /plan-show, approve with /plan-approve.")}`);
+  }
+  console.log();
+}
+
+function handlePlanShow(state: ReplState): void {
+  const plan = state.agent.getCurrentPlan();
+  if (!plan) {
+    console.log(`\n  ${pc.yellow("\u26A0")}  ${pc.gray("No plan yet. Run a task with /plan enabled.")}\n`);
+    return;
+  }
+  console.log();
+  console.log(`  ${pc.cyan("\u25C6")} ${pc.bold(pc.white(plan.summary))}`);
+  console.log(`  ${pc.gray("\u2500".repeat(60))}`);
+  plan.steps.forEach((step, i) => {
+    const icon = step.action === "create" ? pc.green("+") : step.action === "delete" ? pc.red("-") : pc.yellow("~");
+    const file = step.file ? pc.white(step.file) : pc.gray("(no file)");
+    console.log(`  ${icon} ${pc.cyan(`${i + 1}.`)} ${pc.bold(file)} ${pc.gray("\u2014")} ${pc.gray(step.description)}`);
+  });
+  console.log(`  ${pc.gray("\u2500".repeat(60))}`);
+  console.log(`  ${pc.gray("Actions: /plan-approve (execute) | /plan-cancel (discard)")}`);
+  console.log();
+}
+
+async function handlePlanApprove(state: ReplState): Promise<void> {
+  const plan = state.agent.getCurrentPlan();
+  if (!plan) {
+    console.log(`\n  ${pc.yellow("\u26A0")}  ${pc.gray("No plan to approve. Run a task with /plan first.")}\n`);
+    return;
+  }
+  state.agent.setPlanMode(false);
+  state.agent.setCurrentPlan(null);
+  const summary = `Approved plan: ${plan.summary}\n${plan.steps.map((s, i) => `${i + 1}. [${s.action}] ${s.file ?? ""} — ${s.description}`).join("\n")}\n\nNow execute this plan.`;
+  console.log(`\n  ${pc.green("\u2713")} ${pc.gray("Plan approved. Executing...")}\n`);
+  await state.agent.run(summary);
+}
+
+function handlePlanCancel(state: ReplState): void {
+  state.agent.setPlanMode(false);
+  state.agent.setCurrentPlan(null);
+  console.log(`\n  ${pc.gray("\u25CB")} ${pc.gray("Plan discarded.")}\n`);
+}
+
+function handleModeSwitch(state: ReplState): void {
+  const current = state.agent.getTuiMode();
+  console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("TUI Mode:")} ${pc.white(current)}`);
+  console.log(`  ${pc.gray("Modes:")}`);
+  console.log(`    ${pc.cyan("chat")} ${pc.gray("\u2014")} ${pc.gray("Normal conversational mode")}`);
+  console.log(`    ${pc.cyan("plan")} ${pc.gray("\u2014")} ${pc.gray("Force plan-only output")}`);
+  console.log(`    ${pc.cyan("exec")} ${pc.gray("\u2014")} ${pc.gray("Skip confirmation prompts")}`);
+}
+
 async function handleTokenPlans(): Promise<void> {
   const envKey = process.env["MINIMAX_API_KEY"];
   printTokenPlans();
@@ -1454,6 +1764,11 @@ const COMMAND_CATEGORIES: Array<{ label: string; options: PickerOption[] }> = [
     label: "Other",
     options: [
       { label: "/search", hint: "Web search", value: "/search" },
+      { label: "/config", hint: "Edit .aurarc config", value: "/config" },
+      { label: "/plan", hint: "Toggle plan mode", value: "/plan" },
+      { label: "/plan-show", hint: "Show plan", value: "/plan-show" },
+      { label: "/plan-approve", hint: "Approve plan", value: "/plan-approve" },
+      { label: "/mode", hint: "Show TUI mode", value: "/mode" },
       { label: "/project", hint: "Show project info", value: "/project" },
       { label: "/plans", hint: "Show Token Plans", value: "/plans" },
       { label: "/token-plans", hint: "Show Token Plans", value: "/token-plans" },
@@ -1538,6 +1853,12 @@ async function dispatchSlash(state: ReplState, command: string, args: string): P
     case "/search": handleWebSearchCmd(state, args); return true;
     case "/pr": await handlePr(state); return true;
     case "/watch": await handleWatch(state); return true;
+    case "/config": await handleConfig(state, workdir); return true;
+    case "/plan": handlePlanToggle(state); return true;
+    case "/plan-show": case "/ps": handlePlanShow(state); return true;
+    case "/plan-approve": case "/pa": await handlePlanApprove(state); return true;
+    case "/plan-cancel": case "/pc": handlePlanCancel(state); return true;
+    case "/mode": handleModeSwitch(state); return true;
     case "/project": handleProjectInfo(state); return true;
     case "/token-plans":
     case "/plans":
@@ -1567,9 +1888,25 @@ async function runRepl(state: ReplState): Promise<void> {
   };
   setupSigint();
 
-  while (true) {
+  const MODES: Array<"chat" | "plan" | "exec"> = ["chat", "plan", "exec"];
+
+function modePrefix(mode: "chat" | "plan" | "exec", providerColor: (s: string) => string): string {
+  const arrow = providerColor(pc.bold("\u276F"));
+  if (mode === "plan") return `\x1b[48;2;157;124;216m\x1b[38;2;30;30;30m  PLAN  \x1b[39m\x1b[49m ${arrow} `;
+  if (mode === "exec") return `\x1b[48;2;245;167;66m\x1b[38;2;30;30;30m  EXEC  \x1b[39m\x1b[49m ${arrow} `;
+  return `  ${arrow} `;
+}
+
+function nextMode(current: "chat" | "plan" | "exec"): "chat" | "plan" | "exec" {
+  const idx = MODES.indexOf(current);
+  return MODES[(idx + 1) % MODES.length];
+}
+
+while (true) {
     printStatusBar(state);
-    const prefix = pColor(state.modelInfo.provider)(pc.bold(">"));
+    const tuiMode = state.agent.getTuiMode();
+    const prefix = modePrefix(tuiMode, pColor(state.modelInfo.provider));
+    let raw: string;
     const input = await p.text({
       message: prefix,
       placeholder: nextPlaceholder(),
@@ -1583,7 +1920,26 @@ async function runRepl(state: ReplState): Promise<void> {
       process.exit(0);
     }
 
-    let raw = (input as string).trim();
+    raw = (input as string).trim();
+
+    if (raw === "\\\\plan" || raw === "\\\\p") {
+      state.agent.setPlanMode(!state.agent.isPlanMode());
+      console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("PLAN MODE")} ${pc.gray(state.agent.isPlanMode() ? "enabled" : "disabled")}\n`);
+      continue;
+    }
+    if (raw === "\\\\mode" || raw === "\\\\m") {
+      state.agent.setTuiMode(nextMode(tuiMode));
+      console.log(`\n  ${pc.cyan("\u25C6")} ${pc.bold("MODE")} ${pc.gray(state.agent.getTuiMode())}\n`);
+      continue;
+    }
+
+    if (raw.endsWith("\\") || raw.endsWith("/ml") || (raw.includes("{") && !raw.includes("}"))) {
+      let multiLine = raw;
+      const edit = await editorPrompt(multiLine);
+      if (edit !== null) raw = edit.trim();
+    }
+
+    if (!raw) continue;
     if (!raw) continue;
 
     if (raw === "exit" || raw === "quit" || raw === ":q") {
@@ -1665,7 +2021,31 @@ async function runRepl(state: ReplState): Promise<void> {
       continue;
     }
 
-    await state.agent.run(processedPrompt);
+    const runTuiMode = state.agent.getTuiMode();
+    const prevPlanMode = state.agent.isPlanMode();
+    const prevAutoConfirm = state.config.autoConfirm;
+    if (runTuiMode === "plan") state.agent.setPlanMode(true);
+    if (runTuiMode === "exec") (state.config as { autoConfirm: boolean }).autoConfirm = true;
+
+    const APPROVE_TRIGGERS = /^(do it|go|давай|выполняй|делай|approve|yes|yep|y|ок|окей|go ahead|proceed|execute|run it)\.?$/i;
+    if (APPROVE_TRIGGERS.test(raw.trim()) && state.agent.getCurrentPlan()) {
+      const plan = state.agent.getCurrentPlan();
+      state.agent.setPlanMode(false);
+      state.agent.setCurrentPlan(null);
+      const summary = `Approved plan: ${plan?.summary ?? ""}\n${(plan?.steps ?? []).map((s, i) => `${i + 1}. [${s.action}] ${s.file ?? ""} \u2014 ${s.description}`).join("\n")}\n\nNow execute this plan.`;
+      console.log(`\n  ${pc.green("\u2713")} ${pc.gray("Plan approved. Executing...")}\n`);
+      await state.agent.run(summary);
+      autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
+      console.log();
+      continue;
+    }
+
+    try {
+      await state.agent.run(processedPrompt);
+    } finally {
+      if (runTuiMode === "plan") state.agent.setPlanMode(prevPlanMode);
+      if (runTuiMode === "exec") (state.config as { autoConfirm: boolean }).autoConfirm = prevAutoConfirm;
+    }
     console.log();
     autoSaveSession(state.agent, state.modelInfo, state.config.reasoningEffort);
     
@@ -1686,6 +2066,8 @@ async function main(): Promise<void> {
 
   const workdir = process.cwd();
   printBanner();
+  const firstRun = !loadGlobalSettings().lastProvider && !loadConfig(workdir)?.provider;
+  if (firstRun && !parsed.provider) printWelcome();
 
   const savedConfig = loadConfig(workdir);
   const globalSettings = loadGlobalSettings();
@@ -1800,6 +2182,9 @@ async function main(): Promise<void> {
   const confirmFn = createConfirmFn(config.autoConfirm);
   const askUserFn = createAskUserFn();
   const agent = new Agent(config, confirmFn, askUserFn);
+  const projectInfo = detectProjectType(workdir);
+  agent.setLintCmd(projectInfo.lintCmd);
+  agent.setTestCmd(projectInfo.testCmd);
 
   const keyFromEnv = getApiKeyFromEnv(provider);
   saveGlobalSettings({

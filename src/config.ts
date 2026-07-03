@@ -1,24 +1,34 @@
-import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import pc from "picocolors";
 import type { AuraConfig, ProjectTypeInfo } from "./types";
 
-const CONFIG_FILE = ".auracore.json";
+const CONFIG_FILES = [".aurarc", ".aurarc.json", ".auracore.json"];
 
-export function loadConfig(workdir: string): AuraConfig | null {
-  const path = join(workdir, CONFIG_FILE);
-  if (!existsSync(path)) return null;
-  try {
-    const content = readFileSync(path, "utf-8");
-    return JSON.parse(content) as AuraConfig;
-  } catch {
-    return null;
-  }
+function stripJsonc(src: string): string {
+  return src.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-export function saveConfig(workdir: string, config: AuraConfig): boolean {
-  const path = join(workdir, CONFIG_FILE);
+export function loadConfig(workdir: string): AuraConfig | null {
+  for (const name of CONFIG_FILES) {
+    const path = join(workdir, name);
+    if (!existsSync(path)) continue;
+    try {
+      const raw = readFileSync(path, "utf-8");
+      const json = name.endsWith(".json") ? raw : stripJsonc(raw);
+      return JSON.parse(json) as AuraConfig;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export function saveConfig(workdir: string, config: AuraConfig, fileName?: string): boolean {
+  const path = join(workdir, fileName ?? CONFIG_FILES[0]);
   try {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf-8");
     return true;
   } catch {
@@ -33,6 +43,7 @@ export function createDefaultConfig(): AuraConfig {
     reasoningEffort: null,
     autoConfirm: false,
     contextFiles: [],
+    instructions: "",
   };
 }
 
@@ -44,7 +55,25 @@ export function mergeConfig(loaded: AuraConfig | null, overrides: Partial<AuraCo
     reasoningEffort: overrides.reasoningEffort ?? base.reasoningEffort,
     autoConfirm: overrides.autoConfirm ?? base.autoConfirm,
     contextFiles: overrides.contextFiles ?? base.contextFiles,
+    instructions: overrides.instructions ?? base.instructions,
   };
+}
+
+export function createAurarcTemplate(_: string, detected: ProjectTypeInfo): string {
+  const comments = [
+    `// AURA project config`,
+    `// Generated for ${detected.type} project`,
+    `// Uncomment and edit as needed`,
+    "",
+  ].join("\n");
+  return comments + JSON.stringify({
+    provider: null,
+    model: null,
+    reasoningEffort: "off",
+    autoConfirm: false,
+    contextFiles: [],
+    instructions: `Project: ${detected.type} (${detected.language})\nPackage manager: ${detected.packageManager}\n\n# Add custom instructions for the agent`,
+  }, null, 2) + "\n";
 }
 
 export function detectProjectType(workdir: string): ProjectTypeInfo {

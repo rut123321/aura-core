@@ -98,6 +98,16 @@ export async function gitCreateBranch(name: string, workingDir: string): Promise
   return { success: true, message: `Created and switched to: ${name}` };
 }
 
+export async function gitCurrentBranch(workingDir: string): Promise<string | null> {
+  try {
+    const r = await git("rev-parse --abbrev-ref HEAD", workingDir);
+    if (!r.success) return null;
+    return r.stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function gitChangesSummary(workingDir: string): Promise<{ total: number; added: number; modified: number; deleted: number; untracked: number; files: GitChange[] }> {
   const changes = await getGitStatus(workingDir);
   let added = 0, modified = 0, deleted = 0, untracked = 0;

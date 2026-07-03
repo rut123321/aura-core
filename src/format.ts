@@ -414,3 +414,123 @@ export function declined(): string {
 export function blocked(reason: string): string {
   return `     ${C.red("$")} ${C.red("Blocked:")} ${C.red(reason)}`;
 }
+
+// ── Beautiful TUI helpers ───────────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+}
+
+function lerpColor(c1: [number, number, number], c2: [number, number, number], t: number): string {
+  const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
+  const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
+  const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+export function gradient(text: string, fromHex: string, toHex: string): string {
+  const c1 = hexToRgb(fromHex);
+  const c2 = hexToRgb(toHex);
+  const chars = Array.from(text);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    const t = chars.length === 1 ? 0 : i / (chars.length - 1);
+    out.push(lerpColor(c1, c2, t) + chars[i] + "\x1b[39m");
+  }
+  return out.join("");
+}
+
+const AURA_ASCII = [
+  "    ___         ___           ___      ",
+  "   /   | __  __/   | __  __  /   |  ___",
+  "  / /| |/ / / / /| |/ / / / / /| | / _ \\",
+  " / ___ / /_/ / ___ / /_/ / ___ |/  __/",
+  "/_/  |_\\__,_/_/  |_\\__, /_/  |_|\\___| ",
+  "                    __/ /             ",
+  "                   |___/              ",
+];
+
+export function auraBanner(version: string): string {
+  const lines = AURA_ASCII.map((line, i) => {
+    const t = i / (AURA_ASCII.length - 1);
+    const r = Math.round(120 + (250 - 120) * t);
+    const g = Math.round(180 + (140 - 180) * t);
+    const b = Math.round(220 + (180 - 220) * t);
+    return `\x1b[38;2;${r};${g};${b}m${line}\x1b[39m`;
+  });
+  const tagline = gradient("autonomous AI coding agent", "fab2a4", "5d9bdb");
+  const ver = pc.dim(`v${version}`);
+  return [
+    ...lines,
+    `  ${tagline}  ${ver}`,
+    "",
+  ].join("\n");
+}
+
+export interface CapabilityItem {
+  icon: string;
+  label: string;
+  desc: string;
+}
+
+export function welcomeScreen(caps: CapabilityItem[]): string {
+  const out: string[] = [];
+  const title = gradient("Welcome to AURA", "fab2a4", "9d7cd8");
+  out.push(`  ${title}`);
+  out.push(`  ${pc.gray("\u2500".repeat(46))}`);
+  out.push(`  ${pc.dim("What AURA can do for you:")}`);
+  out.push("");
+  for (const c of caps) {
+    out.push(`  ${c.icon}  ${pc.white(pc.bold(c.label))}  ${pc.dim("\u2014")}  ${pc.gray(c.desc)}`);
+  }
+  out.push("");
+  out.push(`  ${pc.gray("\u2500".repeat(46))}`);
+  out.push(`  ${pc.dim("Type")} ${pc.cyan("your task")} ${pc.dim("to begin, or")} ${pc.cyan("/")} ${pc.dim("for commands, or")} ${pc.cyan("?")} ${pc.dim("for help")}`);
+  return out.join("\n");
+}
+
+export function modeBadge(mode: string): string {
+  if (mode === "plan") return `\x1b[48;2;157;124;216m\x1b[38;2;30;30;30m  PLAN  \x1b[39m\x1b[49m`;
+  if (mode === "exec") return `\x1b[48;2;245;167;66m\x1b[38;2;30;30;30m  EXEC  \x1b[39m\x1b[49m`;
+  return `\x1b[48;2;92;156;245m\x1b[38;2;30;30;30m  CHAT  \x1b[39m\x1b[49m`;
+}
+
+export function statusBadge(label: string, color: "green" | "yellow" | "red" | "blue" | "magenta" | "cyan"): string {
+  const colors: Record<string, string> = {
+    green: "127,216,143",
+    yellow: "245,207,102",
+    red: "224,108,117",
+    blue: "92,156,245",
+    magenta: "157,124,216",
+    cyan: "86,182,194",
+  };
+  return `\x1b[48;2;${colors[color]}m\x1b[38;2;30;30;30m ${label} \x1b[39m\x1b[49m`;
+}
+
+export function bigDivider(width = 80): string {
+  const left = "\u256D";
+  const right = "\u256E";
+  return pc.gray(`${left}${"\u2500".repeat(width)}${right}`);
+}
+
+export function sectionDivider(width = 80): string {
+  return pc.gray(`\u2502${" ".repeat(width)}\u2502`);
+}
+
+export function kvLine(key: string, value: string, keyWidth = 12): string {
+  return `  ${pc.dim(key.padEnd(keyWidth))} ${pc.white(value)}`;
+}
+
+export function infoBox(title: string, lines: string[]): string {
+  const w = Math.max(title.length + 4, ...lines.map(l => l.length + 2));
+  const top = pc.gray("\u256D" + "\u2500".repeat(w) + "\u256E");
+  const mid = pc.gray("\u2502") + " " + pc.bold(title).padEnd(w - 1) + pc.gray("\u2502");
+  const sep = pc.gray("\u251C" + "\u2500".repeat(w) + "\u2524");
+  const bot = pc.gray("\u2570" + "\u2500".repeat(w) + "\u256F");
+  const body = lines.map(l => pc.gray("\u2502") + " " + l.padEnd(w - 1) + pc.gray("\u2502"));
+  return [top, mid, sep, ...body, bot].join("\n");
+}
+
+export function hint(text: string): string {
+  return `  ${pc.cyan("\u203A")} ${pc.gray(text)}`;
+}

@@ -204,6 +204,8 @@ export interface AgentConfig {
   workingDirectory: string;
   reasoningEffort: ReasoningEffort;
   contextLength: number | null;
+  planMode?: boolean;
+  tuiMode?: "chat" | "plan" | "exec";
 }
 
 export const DEFAULT_CONFIG: Partial<AgentConfig> = {
@@ -340,6 +342,7 @@ export interface SessionData {
   provider: Provider;
   model: string;
   reasoningEffort: ReasoningEffort;
+  tags?: { branch?: string; projectType?: string; messageCount?: number };
 }
 
 export interface GitChange {
@@ -353,6 +356,7 @@ export interface AuraConfig {
   reasoningEffort: ReasoningEffort | null;
   autoConfirm: boolean;
   contextFiles: string[];
+  instructions?: string;
 }
 
 export interface ProjectTypeInfo {

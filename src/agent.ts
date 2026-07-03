@@ -87,7 +87,26 @@ const SYSTEM_PROMPT = `You are Aura-Core, an elite autonomous AI coding agent op
 - If you encounter an unfamiliar error, search for it in the codebase or run a diagnostic command.
 - Keep your text responses concise. Do not repeat what the tools already show.
 - When you are done, clearly state that the task is complete.
-- Do not use markdown headers in your responses. Use plain text.`;
+- Do not use markdown headers in your responses. Use plain text.
+
+## PLAN MODE
+When the user has PLAN MODE enabled (they will run /plan or send a message prefixed with plan), you must NOT execute any mutating tools (write_file, patch_file, execute_shell with side effects). Instead:
+1. Use read-only tools (list_files, view_file, search_files, glob, web_search) to gather context.
+2. Produce a structured PLAN as your final text response in this JSON format wrapped in a fenced code block:
+
+\`\`\`plan
+{
+  "summary": "Brief 1-2 sentence overview",
+  "steps": [
+    {"action": "create|modify|delete|run", "file": "relative/path", "description": "What and why"},
+    ...
+  ],
+  "risks": ["potential issues"],
+  "verification": ["how to verify it works"]
+}
+\`\`\`
+
+After outputting the plan, stop. Do not call mutating tools. The user will review and approve the plan before execution.`;
 
 
 function truncateCmd(cmd: string, max: number = 55): string {
@@ -283,6 +302,20 @@ function printFooter(model: string, durationMs: number): void {
   console.log(fmtBuildInfo(shortModel, parseFloat(sec)));
 }
 
+interface CostSnapshot {
+  input: number;
+  output: number;
+  total: number;
+  timestamp: number;
+}
+
+export interface AgentPlan {
+  summary: string;
+  steps: Array<{ action: string; file?: string; description: string }>;
+  raw: string;
+  createdAt: number;
+}
+
 export class Agent {
   private anthropicClient: Anthropic | null = null;
   private openaiClient: OpenAI | null = null;
@@ -296,6 +329,12 @@ export class Agent {
   private totalInputTokens = 0;
   private totalOutputTokens = 0;
   private interrupted = false;
+  private costHistory: CostSnapshot[] = [];
+  private lintCmd: string | null = null;
+  private testCmd: string | null = null;
+  private planMode: boolean = false;
+  private currentPlan: AgentPlan | null = null;
+  private tuiMode: "chat" | "plan" | "exec" = "chat";
 
   constructor(config: AgentConfig, confirmFn: ConfirmFn, askUserFn: AskUserFn) {
     this.config = config;
@@ -341,6 +380,50 @@ export class Agent {
     return { input: inputCost, output: outputCost, total: inputCost + outputCost };
   }
 
+  getCostHistory(): CostSnapshot[] { return [...this.costHistory]; }
+
+  recordCostSnapshot(): void {
+    const c = this.getCost();
+    this.costHistory.push({ ...c, timestamp: Date.now() });
+    if (this.costHistory.length > 50) this.costHistory = this.costHistory.slice(-50);
+  }
+
+  setLintCmd(cmd: string | null): void { this.lintCmd = cmd; }
+  setTestCmd(cmd: string | null): void { this.testCmd = cmd; }
+  getTestCmd(): string | null { return this.testCmd; }
+
+  private shouldPlan(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    const triggerWords = /\b(implement|add|create|build|refactor|rewrite|migrate|restructure|design|develop)\b/;
+    const fileRef = prompt.match(/[`"']?[\w./-]+\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|h|hpp|md|json|yaml|yml)["'`]/i);
+    const isShort = prompt.length < 60 && !prompt.includes("\n");
+    const wordCount = prompt.split(/\s+/).length;
+    if (isShort) return false;
+    return triggerWords.test(lower) && (fileRef !== null || wordCount > 8);
+  }
+
+  private async runLintAfterEdit(): Promise<{ success: boolean; output: string } | null> {
+    if (!this.lintCmd) return null;
+    try {
+      const cp = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(cp.exec);
+      const { stdout, stderr } = await exec(this.lintCmd, {
+        cwd: this.config.workingDirectory,
+        timeout: 60_000,
+        maxBuffer: 1024 * 1024,
+      });
+      const combined = (stdout || "") + (stderr || "");
+      if (combined.trim()) console.log(`  ${pc.gray("▎")} ${pc.gray(combined.split("\n").slice(0, 8).join("\n"))}`);
+      return { success: true, output: combined };
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string; message?: string };
+      const combined = (e.stdout ?? "") + (e.stderr ?? "") + (e.message ?? "");
+      console.log(`  ${pc.red("⚠")} ${pc.gray("lint failed")}`);
+      return { success: false, output: combined };
+    }
+  }
+
   getModifiedFiles(): string[] { return getModifiedFiles(); }
 
   getBackupContent(relPath: string): string | null {
@@ -377,6 +460,57 @@ export class Agent {
   interrupt(): void { this.interrupted = true; }
   isInterrupted(): boolean { return this.interrupted; }
 
+  setPlanMode(on: boolean): void { this.planMode = on; }
+  isPlanMode(): boolean { return this.planMode; }
+  getCurrentPlan(): AgentPlan | null { return this.currentPlan; }
+  setCurrentPlan(plan: AgentPlan | null): void { this.currentPlan = plan; }
+
+  setTuiMode(mode: "chat" | "plan" | "exec"): void { this.tuiMode = mode; }
+  getTuiMode(): "chat" | "plan" | "exec" { return this.tuiMode; }
+
+  private extractPlanText(content: unknown): string | null {
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else {
+      const blocks = content as unknown as Array<Record<string, unknown>>;
+      for (const b of blocks) {
+        if (b.type === "text" && typeof b.text === "string") text += b.text;
+      }
+    }
+    const match = text.match(/```plan\s*([\s\S]*?)\n?```/);
+    if (match) return match[1].trim();
+    return null;
+  }
+
+  private parsePlan(planJson: string): AgentPlan {
+    try {
+      const firstBrace = planJson.indexOf("{");
+      const lastBrace = planJson.lastIndexOf("}");
+      const jsonText = firstBrace >= 0 && lastBrace > firstBrace
+        ? planJson.slice(firstBrace, lastBrace + 1)
+        : planJson;
+      const parsed = JSON.parse(jsonText) as { summary?: string; steps?: Array<{ action?: string; file?: string; description?: string }>; risks?: string[]; verification?: string[] };
+      return {
+        summary: parsed.summary ?? "Plan",
+        steps: (parsed.steps ?? []).map(s => ({
+          action: s.action ?? "modify",
+          file: s.file,
+          description: s.description ?? "",
+        })),
+        raw: planJson,
+        createdAt: Date.now(),
+      };
+    } catch {
+      return {
+        summary: "Plan (raw)",
+        steps: [{ action: "modify", description: planJson.slice(0, 500) }],
+        raw: planJson,
+        createdAt: Date.now(),
+      };
+    }
+  }
+
   private shouldAutoCompact(): boolean {
     const ctxLen = this.config.contextLength;
     if (!ctxLen || ctxLen <= 0) return false;
@@ -387,6 +521,57 @@ export class Agent {
 
   private async autoCompact(): Promise<void> {
     console.log(`\n${fmtCompacting()}`);
+    const before = this.conversation.length;
+    const strategy = (this.config as unknown as { compactStrategy?: string }).compactStrategy ?? "smart";
+
+    if (strategy === "smart") {
+      const kept: MessageParam[] = [];
+      let userTextMsgCount = 0;
+      for (let i = 0; i < this.conversation.length; i++) {
+        const msg = this.conversation[i];
+        if (msg.role === "user" && typeof msg.content === "string") {
+          if (i === 0 || this.conversation[i - 1]?.role === "assistant") {
+            kept.push(msg);
+            userTextMsgCount++;
+          } else if (userTextMsgCount < 3) {
+            kept.push(msg);
+            userTextMsgCount++;
+          }
+        } else if (msg.role === "assistant" && typeof msg.content !== "string") {
+          const textOnly = (msg.content as unknown as Array<Record<string, unknown>>)
+            .filter(b => b.type === "text")
+            .map(b => ({ type: "text" as const, text: b.text as string }));
+          if (textOnly.length > 0) {
+            kept.push({ role: "assistant", content: textOnly as unknown as ContentBlockParam[] });
+          }
+        } else if (msg.role === "user" && Array.isArray(msg.content)) {
+          const truncated = (msg.content as unknown as Array<Record<string, unknown>>).map(block => {
+            if (block.type === "tool_result") {
+              const content = (block as Record<string, unknown>).content;
+              const text = typeof content === "string" ? content : JSON.stringify(content ?? "");
+              return {
+                ...block,
+                content: text.length > 500 ? text.slice(0, 200) + "\n[...truncated...]\n" + text.slice(-200) : text,
+              };
+            }
+            return block;
+          });
+          kept.push({ role: "user", content: truncated as unknown as ContentBlockParam[] });
+        }
+      }
+      if (kept.length > 4 && kept.length < this.conversation.length) {
+        this.conversation = [
+          {
+            role: "user",
+            content: `[Earlier conversation trimmed — ${this.conversation.length - kept.length} old tool results removed to fit context window. Continuing from the most recent meaningful exchanges.]`,
+          },
+          ...kept,
+        ];
+        console.log(fmtCompacted(before));
+        return;
+      }
+    }
+
     const summaryPrompt = "Summarize our conversation so far in 5-10 bullet points. Include key decisions, files changed, and remaining tasks. Be extremely concise.";
     this.conversation.push({ role: "user", content: summaryPrompt });
     const prevHistory = this.conversation;
@@ -413,7 +598,12 @@ export class Agent {
   }
 
   async run(userPrompt: string): Promise<AgentRunResult> {
-    this.conversation.push({ role: "user", content: userPrompt });
+    const planningHint = this.shouldPlan(userPrompt);
+    let promptToRun = userPrompt;
+    if (planningHint) {
+      promptToRun = `${userPrompt}\n\n[PLANNING MODE]\nBefore executing any tools, briefly outline the steps you will take (in 3-7 bullet points). List which files you will read, modify, or create. Then proceed with execution.`;
+    }
+    this.conversation.push({ role: "user", content: promptToRun });
     this.interrupted = false;
     const startIterations = this.iterations;
     const startSelfHealing = this.selfHealingAttempts;
@@ -503,13 +693,64 @@ export class Agent {
         (block): block is ToolUseBlock => block.type === "tool_use",
       );
 
+      if (this.planMode) {
+        const planText = this.extractPlanText(response.content);
+        if (planText) {
+          this.currentPlan = this.parsePlan(planText);
+          console.log(`\n${pc.cyan("\u25C6")} ${pc.bold("PLAN READY")} ${pc.gray(`\u2014 ${this.currentPlan.steps.length} steps \u2014 review with /plan-show, approve with /plan-approve`)}\n`);
+          break;
+        }
+      }
+
       if (toolUseBlocks.length === 0) break;
 
       const toolResults: ToolResultBlockParam[] = [];
       let shellFailedInThisBatch = false;
       let shellSucceededInThisBatch = false;
+      let fileModifiedInThisBatch = false;
 
-      for (const block of toolUseBlocks) {
+      const MUTATING_TOOLS = new Set(["write_file", "patch_file", "execute_shell"]);
+      const PARALLEL_TOOLS = new Set(["list_files", "view_file", "search_files", "glob", "web_search"]);
+
+      const readOnlyBlocks = toolUseBlocks.filter(b => PARALLEL_TOOLS.has(b.name));
+      const sequentialBlocks = toolUseBlocks.filter(b => !PARALLEL_TOOLS.has(b.name));
+
+      if (readOnlyBlocks.length > 1) {
+        const parallelResults = await Promise.all(
+          readOnlyBlocks.map(async (block) => {
+            const result = await this.executeTool(block);
+            return result;
+          }),
+        );
+        for (const result of parallelResults) {
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: result.toolUseId,
+            content: result.content,
+            is_error: result.isError,
+          });
+        }
+      } else if (readOnlyBlocks.length === 1) {
+        const block = readOnlyBlocks[0];
+        const result = await this.executeTool(block);
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: result.toolUseId,
+          content: result.content,
+          is_error: result.isError,
+        });
+      }
+
+      for (const block of sequentialBlocks) {
+        if (this.planMode && MUTATING_TOOLS.has(block.name)) {
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: `[PLAN MODE] Tool "${block.name}" is BLOCKED. You must output a plan instead of executing mutations. Provide your final answer as a plan in the JSON format described in PLAN MODE section.`,
+            is_error: true,
+          });
+          continue;
+        }
         const result = await this.executeTool(block);
         toolResults.push({
           type: "tool_result",
@@ -519,6 +760,7 @@ export class Agent {
         });
         if (result.isShellFailure) shellFailedInThisBatch = true;
         if (block.name === "execute_shell" && !result.isShellFailure) shellSucceededInThisBatch = true;
+        if (block.name === "write_file" || block.name === "patch_file") fileModifiedInThisBatch = true;
       }
 
       if (shellSucceededInThisBatch) {
@@ -528,6 +770,16 @@ export class Agent {
       }
 
       this.conversation.push({ role: "user", content: toolResults });
+
+      if (fileModifiedInThisBatch && this.lintCmd) {
+        const lintResult = await this.runLintAfterEdit();
+        if (lintResult && !lintResult.success) {
+          this.conversation.push({
+            role: "user",
+            content: `[AUTO-LINT FAILED]\n${lintResult.output}\n\nFix the errors above and try again.`,
+          });
+        }
+      }
     }
 
     if (this.iterations >= MAX_ITERATIONS) {
@@ -571,7 +823,9 @@ export class Agent {
     const params: Record<string, unknown> = {
       model: this.config.model,
       max_tokens: maxTokens,
-      system: this.getSystemPrompt(),
+      system: [
+        { type: "text", text: this.getSystemPrompt(), cache_control: { type: "ephemeral" } },
+      ],
       messages: this.conversation,
       tools: TOOL_DEFINITIONS,
     };

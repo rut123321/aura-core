@@ -172,6 +172,20 @@ export function saveGlobalSettings(settings: GlobalSettings): void {
   }
 }
 
+function getGitTags(workdir: string): { branch?: string } {
+  try {
+    const cp = require("node:child_process") as typeof import("node:child_process");
+    const branch = cp.execSync("git rev-parse --abbrev-ref HEAD", {
+      cwd: workdir,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return { branch: branch || undefined };
+  } catch {
+    return {};
+  }
+}
+
 export function autoSaveSession(agent: { getConversation: () => unknown[]; getConfig: () => unknown }, modelInfo: { provider: string; label: string; id: string }, reasoningEffort: string): void {
   const ts = Date.now();
   const d = new Date(ts);
@@ -179,17 +193,20 @@ export function autoSaveSession(agent: { getConversation: () => unknown[]; getCo
   const name = `auto-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
   const conv = agent.getConversation();
   if (conv.length === 0) return;
-  const data = {
+  const cfg = agent.getConfig() as { workingDirectory?: string };
+  const gitTags = cfg.workingDirectory ? getGitTags(cfg.workingDirectory) : {};
+  const data: SessionData = {
     name,
     conversation: conv as unknown[],
     config: agent.getConfig() as Record<string, unknown>,
     modelInfo: modelInfo as Record<string, unknown>,
     timestamp: ts,
-    provider: modelInfo.provider,
+    provider: modelInfo.provider as never,
     model: modelInfo.id,
-    reasoningEffort,
+    reasoningEffort: reasoningEffort as never,
+    tags: { ...gitTags, messageCount: conv.length },
   };
-  saveSession(name, data as SessionData);
+  saveSession(name, data);
   trimAutoSessions(10);
 }
 
